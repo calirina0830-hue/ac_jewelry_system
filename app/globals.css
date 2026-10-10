@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #fafaf8;
+  --color-gold: #b88a44;
+  --color-gold-dark: #8b642e;
+  --color-gold-light: #d7b77f;
+  --color-gold-soft: #f5eddf;
+  --color-ink: #27231e;
+  --color-muted: #77736d;
+  --color-border: #e8e3db;
+  --font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --shadow-card: 0 18px 50px rgba(39, 35, 30, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+summary,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.auth-glow {
+  position: absolute;
+  right: -18rem;
+  bottom: -20rem;
+  width: 48rem;
+  height: 48rem;
+  border: 1px solid rgba(215, 183, 127, 0.18);
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle, rgba(184, 138, 68, 0.14), transparent 60%),
+    repeating-radial-gradient(
+      circle,
+      transparent 0,
+      transparent 72px,
+      rgba(215, 183, 127, 0.06) 73px,
+      transparent 74px
+    );
+}
+
+::selection {
+  background: rgba(184, 138, 68, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: white !important;
+  }
+
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  main {
+    padding-left: 0 !important;
+  }
+
+  [data-print-page] {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-print-root] {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  [data-print-root] * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  [data-print-root] [data-print-inset] {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  [data-print-unclip] {
+    overflow: visible !important;
+  }
+
+  [data-print-root] table {
+    min-width: 0 !important;
+  }
+
+  [data-print-root] thead {
+    display: table-header-group;
+  }
+
+  [data-print-root] tr,
+  [data-print-totals],
+  [data-print-band] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

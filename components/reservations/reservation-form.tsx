@@ -1,0 +1,976 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useActionState } from "react";
+
+import {
+  createReservation,
+  updateReservation,
+} from "@/actions/reservations";
+import { StockImage } from "@/components/stock/stock-image";
+import {
+  FormSubmitButton,
+  InputField,
+  TextareaField,
+} from "@/components/ui/form-elements";
+import { formatCurrency } from "@/lib/format";
+import {
+  calculateReservationTotals,
+  parseMoneyToCents,
+} from "@/lib/reservations/money";
+import { getStockImageUrl } from "@/lib/storage/stock-images";
+import type {
+  ReservationCustomerOption,
+  ReservationInitialItem,
+  ReservationInitialValue,
+  ReservationStockOption,
+} from "@/types/reservations";
+import { INITIAL_FORM_STATE } from "@/types/forms";
+
+type DraftItem = ReservationInitialItem & {
+  key: string;
+  quantityInput: string;
+};
+
+function createBlankItem(): DraftItem {
+  return {
+    key: crypto.randomUUID(),
+    stockItemId: "",
+    quantity: 1,
+    quantityInput: "1",
+    discount: "0.00",
+    unitPrice: "",
+    itemName: "",
+    sku: "",
+    imagePath: null,
+  };
+}
+
+function createInitialItem(item: ReservationInitialItem): DraftItem {
+  return {
+    ...item,
+    key: item.reservationItemId ?? crypto.randomUUID(),
+    quantityInput: String(item.quantity),
+  };
+}
+
+function getErrors(
+  errors: Record<string, string[]> | undefined,
+  path: string,
+): string[] | undefined {
+  return errors?.[path];
+}
+
+export function ReservationForm({
+  customers,
+  stockItems,
+  initialValue,
+}: {
+  customers: ReservationCustomerOption[];
+  stockItems: ReservationStockOption[];
+  initialValue?: ReservationInitialValue;
+}) {
+  const action = initialValue ? updateReservation : createReservation;
+  const [state, formAction] = useActionState(action, INITIAL_FORM_STATE);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerOptions, setCustomerOptions] = useState(customers);
+  const [customerId, setCustomerId] = useState(initialValue?.customerId ?? "");
+  const [stockOptions, setStockOptions] = useState(stockItems);
+  const [stockSearches, setStockSearches] = useState<Record<string, string>>({});
+  const [pendingStockSearch, setPendingStockSearch] = useState<{
+    key: string;
+    query: string;
+  } | null>(null);
+  const [items, setItems] = useState<DraftItem[]>(() =>
+    initialValue?.items.length
+      ? initialValue.items.map(createInitialItem)
+      : [createBlankItem()],
+  );
+  const [reservationDiscount, setReservationDiscount] = useState(
+    initialValue?.reservationDiscount ?? "0.00",
+  );
+  const downpayment = initialValue?.downpayment ?? "0.00";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const response = await fetch(
+        "/reservation-options/customers?q=" + encodeURIComponent(customerSearch),
+        { signal: controller.signal },
+      );
+      if (!response.ok) return;
+      const body = (await response.json()) as {
+        options: ReservationCustomerOption[];
+      };
+      setCustomerOptions((current) => {
+        const selected = current.find((option) => option.id === customerId);
+        return selected && !body.options.some((option) => option.id === selected.id)
+          ? [selected, ...body.options]
+          : body.options;
+      });
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [customerId, customerSearch]);
+
+  useEffect(() => {
+    if (!pendingStockSearch?.query.trim()) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const exclude = initialValue ? "&exclude=" + initialValue.id : "";
+      const response = await fetch(
+        "/reservation-options/stock?q=" +
+          encodeURIComponent(pendingStockSearch.query) +
+          exclude,
+        { signal: controller.signal },
+      );
+      if (!response.ok) return;
+      const body = (await response.json()) as {
+        options: ReservationStockOption[];
+      };
+      setStockOptions((current) => {
+        const merged = new Map(current.map((option) => [option.id, option]));
+        body.options.forEach((option) => merged.set(option.id, option));
+        return [...merged.values()];
+      });
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [initialValue, pendingStockSearch]);
+
+  const stockById = useMemo(
+    () => new Map(stockOptions.map((item) => [item.id, item])),
+    [stockOptions],
+  );
+  const normalizedCustomerSearch = customerSearch.trim().toLocaleLowerCase();
+  const visibleCustomers = customerOptions.filter((customer) =>
+    !normalizedCustomerSearch ||
+    customer.name.toLocaleLowerCase().includes(normalizedCustomerSearch) ||
+    customer.facebookName?.toLocaleLowerCase().includes(normalizedCustomerSearch),
+  );
+  const selectedCustomer = customerOptions.find(
+    (customer) => customer.id === customerId,
+  );
+  const preview = calculateReservationTotals(
+    items.map((item) => ({
+      unitPriceCents: parseMoneyToCents(item.unitPrice) ?? 0,
+      quantity: /^\d+$/.test(item.quantityInput)
+        ? Number(item.quantityInput)
+        : 0,
+      discountCents: parseMoneyToCents(item.discount) ?? 0,
+    })),
+    parseMoneyToCents(reservationDiscount) ?? 0,
+    parseMoneyToCents(downpayment) ?? 0,
+  );
+  const serializedItems = JSON.stringify(
+    items.map((item) => ({
+      reservationItemId: item.reservationItemId,
+      stockItemId: item.stockItemId,
+      quantity: item.quantityInput,
+      sellingPrice: item.unitPrice,
+      discount: item.discount,
+    })),
+  );
+
+  function updateItem(key: string, update: Partial<DraftItem>) {
+    setItems((current) =>
+      current.map((item) => (item.key === key ? { ...item, ...update } : item)),
+    );
+  }
+
+  return (
+    <form action={formAction} className="space-y-8" noValidate>
+      {initialValue && (
+        <>
+          <input name="id" type="hidden" value={initialValue.id} />
+          <input
+            name="updatedAt"
+            type="hidden"
+            value={initialValue.updatedAt}
+          />
+        </>
+      )}
+      <input name="items" type="hidden" value={serializedItems} />
+      <input name="downpayment" type="hidden" value={downpayment} />
+
+      {state.message && (
+        <div
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          role="alert"
+        >
+          {state.message}
+        </div>
+      )}
+
+      <section>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
+              Customer
+            </p>
+            <h2 className="mt-1 font-serif text-2xl text-ink">
+              Reservation customer
+            </h2>
+          </div>
+          <Link
+            className="text-sm font-semibold text-gold-dark hover:underline"
+            href="/customers/new"
+          >
+            Add customer
+          </Link>
+        </div>
+        <div className="mt-5 max-w-2xl">
+          <CustomerCombobox
+            error={customerId ? undefined : state.fieldErrors?.customerId?.[0]}
+            onClear={() => {
+              setCustomerId("");
+              setCustomerSearch("");
+            }}
+            onSearch={setCustomerSearch}
+            onSelect={(customer) => {
+              setCustomerId(customer.id);
+              setCustomerSearch("");
+            }}
+            options={visibleCustomers}
+            search={customerSearch}
+            selected={selectedCustomer}
+          />
+          <label className="hidden" htmlFor="customerId">
+            Customer identifier
+            <select
+              aria-describedby={state.fieldErrors?.customerId ? "customerId-error" : undefined}
+              aria-invalid={Boolean(state.fieldErrors?.customerId)}
+              className={
+                "mt-2 block h-12 w-full rounded-xl border bg-white px-4 text-[15px] font-normal text-ink outline-none transition focus:border-gold focus:ring-4 focus:ring-gold/10 " +
+                (state.fieldErrors?.customerId ? "border-red-400" : "border-border")
+              }
+              id="customerId"
+              name="customerId"
+              onChange={(event) => setCustomerId(event.target.value)}
+              required
+              value={customerId}
+            >
+              <option value="">Choose an active customer</option>
+              {visibleCustomers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.facebookName
+                    ? customer.facebookName + " — " + customer.name
+                    : customer.name}
+                </option>
+              ))}
+            </select>
+            {state.fieldErrors?.customerId?.map((error) => (
+              <span
+                className="mt-1.5 block text-xs font-normal text-red-700"
+                id="customerId-error"
+                key={error}
+              >
+                {error}
+              </span>
+            ))}
+          </label>
+        </div>
+      </section>
+
+      <section className="border-t border-border pt-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
+              Jewelry items
+            </p>
+            <h2 className="mt-1 font-serif text-2xl text-ink">
+              Reserved pieces
+            </h2>
+          </div>
+          <button
+            className="rounded-xl border border-gold/40 px-4 py-2.5 text-sm font-bold text-gold-dark transition hover:bg-gold-soft"
+            onClick={() => setItems((current) => [...current, createBlankItem()])}
+            type="button"
+          >
+            + Add another item
+          </button>
+        </div>
+
+        {state.fieldErrors?.items?.map((error) => (
+          <p className="mt-4 text-sm font-medium text-red-700" key={error} role="alert">
+            {error}
+          </p>
+        ))}
+
+        <div className="mt-5 space-y-4">
+          {items.map((item, index) => {
+            const selectedStock = stockById.get(item.stockItemId);
+            const stockSearch = stockSearches[item.key] ?? "";
+            const normalizedStockSearch = stockSearch.trim().toLocaleLowerCase();
+            const visibleStockOptions = stockOptions.filter(
+              (stock) =>
+                stock.id === item.stockItemId ||
+                !normalizedStockSearch ||
+                stock.name.toLocaleLowerCase().includes(normalizedStockSearch) ||
+                stock.sku.toLocaleLowerCase().includes(normalizedStockSearch),
+            );
+            const selectedElsewhere = new Set(
+              items
+                .filter((candidate) => candidate.key !== item.key)
+                .map((candidate) => candidate.stockItemId)
+                .filter(Boolean),
+            );
+            const itemName = selectedStock?.name ?? item.itemName;
+            const itemImagePath = selectedStock?.imagePath ?? item.imagePath;
+            const stockError = item.stockItemId
+              ? undefined
+              : getErrors(state.fieldErrors, "items." + index + ".stockItemId");
+            const sellingPriceError =
+              item.unitPrice !== "" && parseMoneyToCents(item.unitPrice) !== null
+                ? undefined
+                : getErrors(
+                    state.fieldErrors,
+                    "items." + index + ".sellingPrice",
+                  );
+            const discountError =
+              item.discount === "" || parseMoneyToCents(item.discount) !== null
+                ? undefined
+                : getErrors(state.fieldErrors, "items." + index + ".discount");
+            const quantityError = getErrors(
+              state.fieldErrors,
+              "items." + index + ".quantity",
+            );
+
+            return (
+              <div
+                className="rounded-2xl border border-border bg-canvas/50 p-4 sm:p-5"
+                key={item.key}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <StockImage
+                      alt={itemName || "Jewelry item"}
+                      url={getStockImageUrl(itemImagePath)}
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-ink">
+                        {itemName || "Select a stock item"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted">Item {index + 1}</p>
+                    </div>
+                  </div>
+                  {items.length > 1 && (
+                    <button
+                      className="text-xs font-bold text-red-700 hover:underline"
+                      onClick={() =>
+                        setItems((current) =>
+                          current.filter((candidate) => candidate.key !== item.key),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-5 grid gap-4 md:grid-cols-[minmax(220px,2fr)_140px_110px_140px_150px]">
+                  <div className="block text-sm font-semibold text-ink">
+                    <p>Jewelry item</p>
+                    <JewelryItemCombobox
+                      error={Boolean(stockError)}
+                      index={index}
+                      onSearch={(value) => {
+                        setStockSearches((current) => ({
+                          ...current,
+                          [item.key]: value,
+                        }));
+                        setPendingStockSearch({ key: item.key, query: value });
+                      }}
+                      onSelect={(selected) => {
+                        updateItem(item.key, {
+                          reservationItemId:
+                            selected.id === item.stockItemId
+                              ? item.reservationItemId
+                              : undefined,
+                          stockItemId: selected.id,
+                          quantity: 1,
+                          quantityInput: "1",
+                          discount: "0.00",
+                          unitPrice:
+                            selected.id === item.stockItemId
+                              ? item.unitPrice
+                              : "",
+                          itemName: selected.name,
+                          sku: selected.sku,
+                          imagePath: selected.imagePath,
+                        });
+                      }}
+                      options={visibleStockOptions.filter(
+                        (stock) =>
+                          stock.id === item.stockItemId ||
+                          !selectedElsewhere.has(stock.id),
+                      )}
+                      search={stockSearch}
+                      selected={selectedStock}
+                    />
+                    <select
+                      aria-hidden="true"
+                      aria-invalid={Boolean(stockError)}
+                      className="hidden"
+                      tabIndex={-1}
+                      onChange={(event) => {
+                        const selected = stockById.get(event.target.value);
+                        updateItem(item.key, {
+                          reservationItemId: undefined,
+                          stockItemId: event.target.value,
+                          quantity: 1,
+                          quantityInput: "1",
+                          discount: "0.00",
+                          unitPrice: "",
+                          itemName: selected?.name ?? "",
+                          sku: selected?.sku ?? "",
+                          imagePath: selected?.imagePath ?? null,
+                        });
+                      }}
+                      value={item.stockItemId}
+                    >
+                      <option value="">Choose active stock</option>
+                      {!selectedStock && item.stockItemId && (
+                        <option value={item.stockItemId}>
+                          Previously selected item — choose a replacement
+                        </option>
+                      )}
+                      {visibleStockOptions.map((stock) => (
+                        <option
+                          disabled={selectedElsewhere.has(stock.id)}
+                          key={stock.id}
+                          value={stock.id}
+                        >
+                          {stock.name}
+                        </option>
+                      ))}
+                    </select>
+                    {stockError?.map((error) => (
+                      <span className="mt-1.5 block text-xs text-red-700" key={error}>
+                        {error}
+                      </span>
+                    ))}
+                  </div>
+
+                  <label className="block text-sm font-semibold text-ink">
+                    Selling price
+                    <input
+                      aria-invalid={Boolean(sellingPriceError)}
+                      className="mt-2 block h-12 w-full rounded-xl border border-border bg-white px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) =>
+                        updateItem(item.key, { unitPrice: event.target.value })
+                      }
+                      placeholder="Enter selling price"
+                      required
+                      step="0.01"
+                      type="number"
+                      value={item.unitPrice}
+                    />
+                    {sellingPriceError?.map((error) => (
+                      <span
+                        className="mt-1.5 block text-xs text-red-700"
+                        key={error}
+                      >
+                        {error}
+                      </span>
+                    ))}
+                  </label>
+
+                  <label className="block text-sm font-semibold text-ink">
+                    Quantity
+                    <input
+                      aria-invalid={Boolean(quantityError)}
+                      className={
+                        "mt-2 block h-12 w-full rounded-xl border bg-white px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10 " +
+                        (quantityError ? "border-red-400" : "border-border")
+                      }
+                      inputMode="numeric"
+                      min="1"
+                      onChange={(event) =>
+                        updateItem(item.key, {
+                          quantity: Number(event.target.value) || 0,
+                          quantityInput: event.target.value,
+                        })
+                      }
+                      required
+                      step="1"
+                      type="number"
+                      value={item.quantityInput}
+                    />
+                    {quantityError?.map((error) => (
+                      <span className="mt-1.5 block text-xs text-red-700" key={error}>
+                        {error}
+                      </span>
+                    ))}
+                  </label>
+
+                  <label className="block text-sm font-semibold text-ink">
+                    Discount <span className="font-normal text-muted">(optional)</span>
+                    <input
+                      aria-invalid={Boolean(discountError)}
+                      className={
+                        "mt-2 block h-12 w-full rounded-xl border bg-white px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10 " +
+                        (discountError ? "border-red-400" : "border-border")
+                      }
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) =>
+                        updateItem(item.key, { discount: event.target.value })
+                      }
+                      step="0.01"
+                      type="number"
+                      value={item.discount}
+                    />
+                    {discountError?.map((error) => (
+                      <span className="mt-1.5 block text-xs text-red-700" key={error}>
+                        {error}
+                      </span>
+                    ))}
+                  </label>
+
+                  <div>
+                    <p className="text-sm font-semibold text-ink">Line total</p>
+                    <div className="mt-2 flex h-12 items-center rounded-xl border border-border bg-white px-3 text-sm font-bold text-ink">
+                      {formatCurrency(preview.lines[index]?.lineTotalCents / 100 || 0)}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="grid gap-7 border-t border-border pt-8 lg:grid-cols-[1fr_340px]">
+        <TextareaField
+          defaultValue={initialValue?.notes ?? ""}
+          errors={state.fieldErrors?.notes}
+          label="Reservation notes"
+          maxLength={4000}
+          name="notes"
+          placeholder="Sizing, pickup arrangements, or other reservation details"
+          rows={7}
+        />
+
+        <div className="rounded-2xl border border-border bg-canvas p-5">
+          <h2 className="font-serif text-2xl text-ink">Reservation summary</h2>
+          <dl className="mt-5 space-y-3 border-b border-border pb-5 text-sm">
+            <SummaryTextRow
+              label="Customer name"
+              value={selectedCustomer?.name ?? "Select a customer"}
+            />
+            {selectedCustomer?.facebookName && (
+              <SummaryTextRow
+                label="Facebook / CS"
+                value={selectedCustomer.facebookName}
+              />
+            )}
+            <SummaryTextRow
+              label="Reservation number"
+              value={initialValue?.reservationNo ?? "Assigned when saved"}
+            />
+            <SummaryTextRow label="Status" value="Reserved" />
+            <SummaryTextRow
+              label="Quantity"
+              value={String(items.filter((item) => item.stockItemId).length)}
+            />
+          </dl>
+          <div className="mt-5 grid gap-4">
+            <InputField
+              errors={state.fieldErrors?.reservationDiscount}
+              inputMode="decimal"
+              label="Reservation discount"
+              min="0"
+              name="reservationDiscount"
+              onChange={(event) => setReservationDiscount(event.target.value)}
+              step="0.01"
+              type="number"
+              value={reservationDiscount}
+            />
+          </div>
+          <dl className="mt-6 space-y-3 border-t border-border pt-5 text-sm">
+            <SummaryRow label="Subtotal" value={preview.subtotalCents} />
+            <SummaryRow
+              label="Reservation discount"
+              value={parseMoneyToCents(reservationDiscount) ?? 0}
+            />
+            <SummaryRow label="Total" strong value={preview.totalCents} />
+            {(parseMoneyToCents(downpayment) ?? 0) > 0 && (
+              <SummaryRow
+                label="Previously recorded amount"
+                value={parseMoneyToCents(downpayment) ?? 0}
+              />
+            )}
+            <SummaryRow label="Balance" strong value={preview.balanceCents} />
+          </dl>
+          <p className="mt-4 text-xs leading-5 text-muted">
+            Preview only. Prices, availability, and every total are verified again
+            by the server when saved.
+          </p>
+        </div>
+      </section>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-6">
+        <FormSubmitButton>
+          {initialValue ? "Save reservation" : "Create reservation"}
+        </FormSubmitButton>
+        <Link
+          className="inline-flex h-11 items-center rounded-xl border border-border px-5 text-sm font-semibold text-ink hover:border-gold"
+          href={initialValue ? "/reservations/" + initialValue.id : "/reservations"}
+        >
+          Cancel
+        </Link>
+      </div>
+    </form>
+  );
+}
+
+function CustomerCombobox({
+  search,
+  selected,
+  options,
+  error,
+  onSearch,
+  onSelect,
+  onClear,
+}: {
+  search: string;
+  selected?: ReservationCustomerOption;
+  options: ReservationCustomerOption[];
+  error?: string;
+  onSearch: (value: string) => void;
+  onSelect: (option: ReservationCustomerOption) => void;
+  onClear: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [changing, setChanging] = useState(!selected);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const showingSelection = Boolean(selected && !changing);
+
+  function beginChange() {
+    onSearch("");
+    setActiveIndex(0);
+    setChanging(true);
+    setOpen(true);
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function select(option: ReservationCustomerOption) {
+    onSelect(option);
+    setChanging(false);
+    setOpen(false);
+  }
+
+  return (
+    <div
+      className={"relative " + (open ? "z-[80]" : "z-20")}
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+          if (selected) setChanging(false);
+        }
+      }}
+      ref={rootRef}
+    >
+      <p className="text-sm font-semibold text-ink">Customer</p>
+      {showingSelection ? (
+        <div
+          className={
+            "mt-2 flex min-h-14 items-center gap-3 rounded-xl border bg-white px-4 py-2 " +
+            (error ? "border-red-400" : "border-border")
+          }
+        >
+          <button
+            className="min-w-0 flex-1 text-left"
+            onClick={beginChange}
+            type="button"
+          >
+            <span className="block truncate text-sm font-bold text-ink">
+              {selected?.name}
+            </span>
+            <span className="block truncate text-xs text-muted">
+              {selected?.facebookName
+                ? "FB/CS: " + selected.facebookName
+                : "No FB / CS name"}
+            </span>
+          </button>
+          <button
+            className="shrink-0 text-xs font-bold text-gold-dark hover:underline"
+            onClick={() => {
+              onClear();
+              setChanging(true);
+              setOpen(true);
+              window.requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+            type="button"
+          >
+            Clear / change
+          </button>
+        </div>
+      ) : (
+        <input
+          aria-activedescendant={
+            open && options[activeIndex]
+              ? "customer-option-" + options[activeIndex].id
+              : undefined
+          }
+          aria-controls="customer-options"
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-invalid={Boolean(error)}
+          autoComplete="off"
+          className={
+            "mt-2 block h-12 w-full rounded-xl border bg-white px-4 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10 " +
+            (error ? "border-red-400" : "border-border")
+          }
+          onChange={(event) => {
+            setActiveIndex(0);
+            onSearch(event.target.value);
+            setOpen(true);
+          }}
+          onClick={() => setOpen(true)}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) =>
+                Math.min(current + 1, Math.max(options.length - 1, 0)),
+              );
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Enter" && open && options[activeIndex]) {
+              event.preventDefault();
+              select(options[activeIndex]);
+            } else if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          placeholder="Search customer name or FB / CS name..."
+          ref={inputRef}
+          role="combobox"
+          type="search"
+          value={search}
+        />
+      )}
+      {error && (
+        <span className="mt-1.5 block text-xs text-red-700" role="alert">
+          {error}
+        </span>
+      )}
+      {open && !showingSelection && (
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-xl"
+          id="customer-options"
+          role="listbox"
+        >
+          {options.length ? (
+            options.map((option, optionIndex) => (
+              <button
+                aria-selected={option.id === selected?.id}
+                className={
+                  "block w-full rounded-lg px-3 py-2 text-left hover:bg-canvas " +
+                  (optionIndex === activeIndex ? "bg-canvas" : "")
+                }
+                id={"customer-option-" + option.id}
+                key={option.id}
+                onClick={() => select(option)}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(optionIndex)}
+                role="option"
+                type="button"
+              >
+                <span className="block truncate text-sm font-semibold text-ink">
+                  {option.name}
+                </span>
+                <span className="block truncate text-xs text-muted">
+                  {option.facebookName
+                    ? "FB/CS: " + option.facebookName
+                    : "No FB / CS name"}
+                </span>
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-5 text-center text-xs text-muted">
+              No matching customers.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JewelryItemCombobox({
+  index,
+  search,
+  selected,
+  options,
+  error,
+  onSearch,
+  onSelect,
+}: {
+  index: number;
+  search: string;
+  selected?: ReservationStockOption;
+  options: ReservationStockOption[];
+  error: boolean;
+  onSearch: (value: string) => void;
+  onSelect: (option: ReservationStockOption) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  function select(option: ReservationStockOption) {
+    onSelect(option);
+    onSearch("");
+    setOpen(false);
+  }
+
+  return (
+    <div
+      className={"relative " + (open ? "z-[70]" : "z-20")}
+      onBlur={(event) => {
+        if (!rootRef.current?.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+      ref={rootRef}
+    >
+      <input
+        aria-activedescendant={
+          open && options[activeIndex]
+            ? "stock-option-" + index + "-" + options[activeIndex].id
+            : undefined
+        }
+        aria-controls={"stock-options-" + index}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={"Search jewelry item " + (index + 1)}
+        autoComplete="off"
+        className={
+          "mt-2 block h-12 w-full rounded-xl border bg-white px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10 " +
+          (error ? "border-red-400" : "border-border")
+        }
+        onChange={(event) => {
+          setActiveIndex(0);
+          onSearch(event.target.value);
+          setOpen(true);
+        }}
+        onClick={() => setOpen(true)}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+            setActiveIndex((current) =>
+              Math.min(current + 1, Math.max(options.length - 1, 0)),
+            );
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveIndex((current) => Math.max(current - 1, 0));
+          } else if (
+            event.key === "Enter" &&
+            open &&
+            options[activeIndex]
+          ) {
+            event.preventDefault();
+            select(options[activeIndex]);
+          } else if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        placeholder="Search jewelry item..."
+        role="combobox"
+        type="search"
+        value={search}
+      />
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-xl"
+          id={"stock-options-" + index}
+          role="listbox"
+        >
+          {options.length ? (
+            options.map((option, optionIndex) => (
+              <button
+                aria-selected={option.id === selected?.id}
+                className={
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-canvas " +
+                  (optionIndex === activeIndex ? "bg-canvas" : "")
+                }
+                id={"stock-option-" + index + "-" + option.id}
+                key={option.id}
+                onClick={() => select(option)}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(optionIndex)}
+                role="option"
+                type="button"
+              >
+                <StockImage
+                  alt={option.name}
+                  url={getStockImageUrl(option.imagePath)}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-ink">
+                    {option.name}
+                  </span>
+                  <span className="block text-[11px] font-normal text-muted">
+                    Code: {option.sku}
+                  </span>
+                </span>
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-5 text-center text-xs font-normal text-muted">
+              No matching jewelry items.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryTextRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <dt className="text-muted">{label}</dt>
+      <dd className="max-w-[190px] text-right font-semibold text-ink">{value}</dd>
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: number;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className={strong ? "font-bold text-ink" : "text-muted"}>{label}</dt>
+      <dd className={strong ? "font-bold text-ink" : "font-semibold text-ink"}>
+        {formatCurrency(value / 100)}
+      </dd>
+    </div>
+  );
+}
