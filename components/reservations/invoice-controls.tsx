@@ -8,7 +8,6 @@ import {
   updateReservationInvoiceNotes,
 } from "@/actions/reservations";
 import { recordReservationPayments } from "@/actions/payments";
-import { PrintInvoiceButton } from "@/components/reservations/print-invoice-button";
 import { formatCurrency } from "@/lib/format";
 
 type InvoiceControlsProps = {
@@ -121,7 +120,6 @@ export function InvoiceActionBar({
             </button>
           </>
         )}
-        <PrintInvoiceButton />
       </div>
       {feedback && (
         <p

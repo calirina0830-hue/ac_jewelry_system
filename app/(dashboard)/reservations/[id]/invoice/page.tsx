@@ -2,10 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { transitionReservationStatus } from "@/actions/reservations";
 import {
   InvoiceActionBar,
   InvoiceNotes,
 } from "@/components/reservations/invoice-controls";
+import { PrintInvoiceButton } from "@/components/reservations/print-invoice-button";
+import { ConfirmAction } from "@/components/ui/confirm-action";
 import { logActivity } from "@/lib/activity";
 import { getCurrentProfile } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
@@ -14,6 +17,7 @@ import {
   getInvoiceStatusLabel,
   getInvoiceTotals,
 } from "@/lib/reservations/invoice";
+import { getReservationTransitions } from "@/lib/reservations/status";
 import { createClient } from "@/lib/supabase/server";
 import { reservationIdSchema } from "@/lib/validation/reservations";
 
@@ -81,6 +85,10 @@ export default async function ReservationInvoicePage({
   );
   const statusLabel = getInvoiceStatusLabel(reservation.status);
   const canWrite = profile?.role === "admin" || profile?.role === "staff";
+  const cancelTransition = getReservationTransitions(
+    profile?.role,
+    reservation.status,
+  ).find((transition) => transition.to === "cancelled");
   const customerDetails = [
     { label: "Facebook / CS Name", value: customer?.facebook_name },
     { label: "Phone", value: customer?.phone },
@@ -89,22 +97,42 @@ export default async function ReservationInvoicePage({
 
   return (
     <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8" data-print-page>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3" data-print-hide>
-        <Link
-          className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
-          href={"/reservations/" + reservation.id}
-        >
-          Back to reservation
-        </Link>
-        <InvoiceActionBar
-          balance={totals.balance}
-          canWrite={canWrite && !reservation.archived_at && reservation.status !== "cancelled"}
-          deliveredAt={reservation.delivered_at}
-          notes={reservation.notes}
-          pricingComplete={reservation.pricing_complete}
-          reservationId={reservation.id}
-          updatedAt={reservation.updated_at}
-        />
+      <div className="mb-5 space-y-3" data-print-hide>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
+            href={"/reservations/" + reservation.id}
+          >
+            Back to reservation
+          </Link>
+          <PrintInvoiceButton />
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <InvoiceActionBar
+            balance={totals.balance}
+            canWrite={canWrite && !reservation.archived_at && reservation.status !== "cancelled"}
+            deliveredAt={reservation.delivered_at}
+            notes={reservation.notes}
+            pricingComplete={reservation.pricing_complete}
+            reservationId={reservation.id}
+            updatedAt={reservation.updated_at}
+          />
+          {cancelTransition && !reservation.archived_at && (
+            <ConfirmAction
+              action={transitionReservationStatus.bind(
+                null,
+                reservation.id,
+                "cancelled",
+                reservation.updated_at,
+              )}
+              appearance="compact-danger"
+              confirmation={cancelTransition.confirmation}
+              variant="danger"
+            >
+              CANCEL
+            </ConfirmAction>
+          )}
+        </div>
       </div>
 
       <article className="border border-border bg-white shadow-card" data-print-root>
@@ -197,13 +225,7 @@ export default async function ReservationInvoicePage({
             )}
           </div>
           <div>
-            <InvoiceNotes
-              canWrite={canWrite && !reservation.archived_at}
-              notes={reservation.notes}
-              reservationId={reservation.id}
-              updatedAt={reservation.updated_at}
-            />
-            <div className="mt-4 border-t border-border pt-3 sm:text-left">
+            <div className="border-t border-border pt-3 sm:text-left">
               <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
                 Invoice From
               </p>
@@ -211,6 +233,14 @@ export default async function ReservationInvoicePage({
                 {BUSINESS.name}
               </p>
               <p className="text-xs text-muted">{BUSINESS.descriptor}</p>
+            </div>
+            <div className="mt-4">
+              <InvoiceNotes
+                canWrite={canWrite && !reservation.archived_at}
+                notes={reservation.notes}
+                reservationId={reservation.id}
+                updatedAt={reservation.updated_at}
+              />
             </div>
           </div>
         </section>
