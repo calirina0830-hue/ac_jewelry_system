@@ -95,20 +95,27 @@ export function ReservationForm({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      const response = await fetch(
-        "/reservation-options/customers?q=" + encodeURIComponent(customerSearch),
-        { signal: controller.signal },
-      );
-      if (!response.ok) return;
-      const body = (await response.json()) as {
-        options: ReservationCustomerOption[];
-      };
-      setCustomerOptions((current) => {
-        const selected = current.find((option) => option.id === customerId);
-        return selected && !body.options.some((option) => option.id === selected.id)
-          ? [selected, ...body.options]
-          : body.options;
-      });
+      try {
+        const response = await fetch(
+          "/reservation-options/customers?q=" + encodeURIComponent(customerSearch),
+          { signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const body = (await response.json()) as {
+          options: ReservationCustomerOption[];
+        };
+        setCustomerOptions((current) => {
+          const selected = current.find((option) => option.id === customerId);
+          return selected && !body.options.some((option) => option.id === selected.id)
+            ? [selected, ...body.options]
+            : body.options;
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        console.error("Error fetching customer options:", error);
+      }
     }, 200);
 
     return () => {
@@ -121,22 +128,29 @@ export function ReservationForm({
     if (!pendingStockSearch?.query.trim()) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      const exclude = initialValue ? "&exclude=" + initialValue.id : "";
-      const response = await fetch(
-        "/reservation-options/stock?q=" +
-          encodeURIComponent(pendingStockSearch.query) +
-          exclude,
-        { signal: controller.signal },
-      );
-      if (!response.ok) return;
-      const body = (await response.json()) as {
-        options: ReservationStockOption[];
-      };
-      setStockOptions((current) => {
-        const merged = new Map(current.map((option) => [option.id, option]));
-        body.options.forEach((option) => merged.set(option.id, option));
-        return [...merged.values()];
-      });
+      try {
+        const exclude = initialValue ? "&exclude=" + initialValue.id : "";
+        const response = await fetch(
+          "/reservation-options/stock?q=" +
+            encodeURIComponent(pendingStockSearch.query) +
+            exclude,
+          { signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const body = (await response.json()) as {
+          options: ReservationStockOption[];
+        };
+        setStockOptions((current) => {
+          const merged = new Map(current.map((option) => [option.id, option]));
+          body.options.forEach((option) => merged.set(option.id, option));
+          return [...merged.values()];
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        console.error("Error fetching stock options:", error);
+      }
     }, 200);
 
     return () => {
