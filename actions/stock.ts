@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 
 import { logActivity } from "@/lib/activity";
 import { authorizeRoles, roleIsAdmin } from "@/lib/auth";
-import { STOCK_IMAGE_BUCKET } from "@/lib/constants/stock";
+import { STOCK_IMAGE_BUCKET, type StockCategory } from "@/lib/constants/stock";
 import { resolveStockQuantity } from "@/lib/stock/quantity";
 import { createClient } from "@/lib/supabase/server";
 import { validateStockImage } from "@/lib/storage/stock-images";
@@ -381,4 +381,169 @@ export async function restoreStockItem(id: string): Promise<void> {
   revalidatePath("/stock/" + parsedId.data);
   revalidatePath("/dashboard");
   redirect("/stock?message=restored");
+}
+
+export type InlineStockResult =
+  | {
+      success: true;
+      item: {
+        id: string;
+        sku: string;
+        name: string;
+        category: StockCategory;
+        imagePath: string | null;
+        price: number;
+      };
+    }
+  | {
+      success: false;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+    };
+
+export async function createStockItemInline(input: {
+  sku: string;
+  name: string;
+  category: StockCategory;
+  description?: string;
+  price?: number;
+  quantity?: number;
+}): Promise<InlineStockResult> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  if (!authorization) {
+    return {
+      success: false,
+      message: "You do not have permission to perform this action.",
+    };
+  }
+
+  const parsed = stockFormSchema.safeParse({
+    sku: input.sku,
+    name: input.name,
+    category: input.category,
+    description: input.description,
+    quantity: input.quantity ?? 1,
+    isActive: "true",
+  });
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: "Please correct the highlighted fields.",
+      fieldErrors: getFieldErrors(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("stock_items")
+    .insert({
+      sku: parsed.data.sku,
+      name: parsed.data.name,
+      description: parsed.data.description,
+      category: parsed.data.category,
+      price: input.price && input.price > 0 ? input.price : 0,
+      quantity: parsed.data.quantity,
+      is_active: true,
+      image_path: null,
+      created_by: authorization.user.id,
+    })
+    .select("id, sku, name, category, image_path, price")
+    .single();
+
+  if (error) {
+    console.error("Inline stock creation failed", {
+      code: error.code,
+      message: error.message,
+    });
+    return {
+      success: false,
+      message:
+        error.code === "23505"
+          ? "That SKU is already in use."
+          : error.message || "The stock item could not be created.",
+      fieldErrors:
+        error.code === "23505" ? { sku: ["SKU must be unique."] } : undefined,
+    };
+  }
+
+  revalidatePath("/stock");
+  revalidatePath("/dashboard");
+  revalidatePath("/reservations/new");
+  await logActivity(supabase, {
+    action: "stock_created",
+    entityType: "stock",
+    entityId: data.id,
+    description: "Created stock item " + parsed.data.sku + " (" + parsed.data.name + ") inline.",
+    metadata: { sku: parsed.data.sku, name: parsed.data.name },
+  });
+
+  return {
+    success: true,
+    item: {
+      id: data.id,
+      sku: data.sku,
+      name: data.name,
+      category: data.category as StockCategory,
+      imagePath: data.image_path,
+      price: Number(data.price),
+    },
+  };
+}
+
+export async function saveImportProducts(
+  products: Array<{
+    sku: string;
+    name: string;
+    category: StockCategory;
+    price?: number;
+    initialQuantity?: number;
+  }>,
+): Promise<{ success: boolean; message?: string; createdCount?: number }> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  if (!authorization) {
+    return {
+      success: false,
+      message: "You do not have permission to perform this action.",
+    };
+  }
+
+  if (!products.length) {
+    return { success: true, createdCount: 0 };
+  }
+
+  const supabase = await createClient();
+  let createdCount = 0;
+
+  for (const item of products) {
+    const sku = item.sku.trim();
+    const name = item.name.trim();
+    if (!sku || name.length < 2) continue;
+
+    const { error } = await supabase.from("stock_items").insert({
+      sku,
+      name,
+      category: item.category,
+      price: item.price && item.price > 0 ? item.price : 0,
+      quantity: item.initialQuantity ?? 1,
+      is_active: true,
+      description: "Created by Live Selling import.",
+      created_by: authorization.user.id,
+    });
+
+    if (!error) {
+      createdCount++;
+    } else if (error.code !== "23505") {
+      console.error("Failed to save import product to stock", sku, error.message);
+    }
+  }
+
+  revalidatePath("/stock");
+  revalidatePath("/dashboard");
+  revalidatePath("/reservations/import");
+
+  return {
+    success: true,
+    createdCount,
+  };
 }

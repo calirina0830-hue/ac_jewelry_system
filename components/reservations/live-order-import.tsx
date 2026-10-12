@@ -3,6 +3,8 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 
+import { saveImportProducts } from "@/actions/stock";
+import { STOCK_CATEGORIES, type StockCategory } from "@/lib/constants/stock";
 import type {
   LiveImportPreview,
   LiveImportResult,
@@ -21,7 +23,7 @@ type ConfirmResult = {
 const RESULT_STYLES: Record<LiveImportResult, string> = {
   "Ready": "bg-emerald-50 text-emerald-700",
   "New Customer": "bg-gold-soft text-gold-dark",
-  "New Item": "bg-blue-50 text-blue-700",
+  "New Product": "bg-blue-50 text-blue-700",
   "Invalid Price": "bg-red-50 text-red-700",
   "Invalid Downpayment": "bg-red-50 text-red-700",
   "Invalid Quantity": "bg-red-50 text-red-700",
@@ -50,12 +52,58 @@ export function LiveOrderImport() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"preview" | "confirm" | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [savingProducts, setSavingProducts] = useState(false);
+  const [productFeedback, setProductFeedback] = useState<string | null>(null);
+  const [editedProducts, setEditedProducts] = useState<
+    Record<string, { name: string; category: StockCategory }>
+  >({});
 
   function chooseFile(nextFile: File | null) {
     setFile(nextFile);
     setPreview(null);
     setConfirmed(null);
     setError("");
+    setProductFeedback(null);
+    setEditedProducts({});
+  }
+
+  async function handleSaveNewProducts() {
+    if (!preview || !preview.detectedNewProducts.length) return;
+    setSavingProducts(true);
+    setProductFeedback(null);
+    setError("");
+
+    try {
+      const productsToSave = preview.detectedNewProducts.map((p) => {
+        const edits = editedProducts[p.sku];
+        return {
+          sku: p.sku,
+          name: edits?.name?.trim() || p.name.trim(),
+          category: edits?.category || p.category,
+          price: p.price,
+          initialQuantity: p.initialQuantity,
+        };
+      });
+
+      const invalid = productsToSave.find((p) => p.name.length < 2);
+      if (invalid) {
+        throw new Error(`Product ${invalid.sku} requires a name of at least 2 characters.`);
+      }
+
+      const res = await saveImportProducts(productsToSave);
+      if (!res.success) {
+        throw new Error(res.message || "Failed to save products to stock.");
+      }
+
+      setProductFeedback(
+        `Successfully saved ${res.createdCount ?? productsToSave.length} product(s) to Stock! Refreshing preview...`,
+      );
+      await submit("preview");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save products to stock.");
+    } finally {
+      setSavingProducts(false);
+    }
   }
 
   async function submit(endpoint: "preview" | "confirm") {
@@ -87,6 +135,11 @@ export function LiveOrderImport() {
 
       if (endpoint === "preview" && payload.preview) {
         setPreview(payload.preview);
+        const initialEdits: Record<string, { name: string; category: StockCategory }> = {};
+        for (const item of payload.preview.detectedNewProducts) {
+          initialEdits[item.sku] = { name: item.name, category: item.category };
+        }
+        setEditedProducts(initialEdits);
         setConfirmed(null);
       } else if (endpoint === "confirm" && payload.result) {
         setConfirmed(payload.result);
@@ -220,13 +273,95 @@ export function LiveOrderImport() {
                   <Summary label="Invalid rows" value={preview.summary.invalidRows} alert={preview.summary.invalidRows > 0} />
                   <Summary label="Existing customers" value={preview.summary.existingCustomers} />
                   <Summary label="New customers" value={preview.summary.newCustomers} />
+                  <Summary label="New products" value={preview.summary.newProducts} />
                   <Summary label="Reservations" value={preview.summary.reservationsToCreate} />
                   <Summary label="Quantity" value={preview.summary.itemsToCreate} />
-                  <Summary label="Pricing state" value="From file" />
                 </div>
               </div>
             </div>
           </section>
+
+          {preview.detectedNewProducts.length > 0 && (
+            <section className="rounded-3xl border border-blue-200 bg-blue-50/50 p-6 shadow-card">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+                    Detected New Products
+                  </p>
+                  <h3 className="mt-1 font-serif text-xl text-ink">
+                    {preview.detectedNewProducts.length} new product{preview.detectedNewProducts.length > 1 ? "s" : ""} will be added to Stock
+                  </h3>
+                  <p className="mt-1 text-xs text-muted">
+                    Review and verify product names and categories before completing the reservation.
+                  </p>
+                </div>
+                <button
+                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                  disabled={savingProducts || busy !== null}
+                  onClick={handleSaveNewProducts}
+                  type="button"
+                >
+                  {savingProducts ? "Saving to Stock..." : "Save All to Stock Now"}
+                </button>
+              </div>
+
+              {productFeedback && (
+                <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-100/60 p-3 text-xs font-semibold text-emerald-800">
+                  {productFeedback}
+                </div>
+              )}
+
+              <div className="mt-4 divide-y divide-blue-200/60 overflow-hidden rounded-2xl border border-blue-200 bg-white">
+                {preview.detectedNewProducts.map((p) => {
+                  const current = editedProducts[p.sku] ?? { name: p.name, category: p.category };
+                  return (
+                    <div className="flex flex-wrap items-center gap-4 p-4" key={p.sku}>
+                      <span className="inline-flex rounded-lg bg-blue-100 px-2.5 py-1 font-mono text-xs font-bold text-blue-800">
+                        {p.sku}
+                      </span>
+                      <div className="min-w-[200px] flex-1">
+                        <label className="text-xs font-medium text-muted">Product Name</label>
+                        <input
+                          className="mt-1 block h-9 w-full rounded-lg border border-border px-3 text-xs text-ink outline-none focus:border-gold"
+                          value={current.name}
+                          onChange={(e) =>
+                            setEditedProducts((prev) => ({
+                              ...prev,
+                              [p.sku]: { ...current, name: e.target.value },
+                            }))
+                          }
+                          placeholder="Product Name (required)"
+                        />
+                      </div>
+                      <div className="w-[140px]">
+                        <label className="text-xs font-medium text-muted">Category</label>
+                        <select
+                          className="mt-1 block h-9 w-full rounded-lg border border-border px-2 text-xs text-ink outline-none focus:border-gold"
+                          value={current.category}
+                          onChange={(e) =>
+                            setEditedProducts((prev) => ({
+                              ...prev,
+                              [p.sku]: { ...current, category: e.target.value as StockCategory },
+                            }))
+                          }
+                        >
+                          {STOCK_CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="text-right text-xs">
+                        <p className="text-muted">Quantity: <span className="font-bold text-ink">{p.initialQuantity}</span></p>
+                        <p className="text-muted">Price: <span className="font-bold text-ink">{formatPeso(p.price)}</span></p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <section className="overflow-hidden rounded-3xl border border-border bg-white shadow-card">
             <div className="overflow-x-auto">

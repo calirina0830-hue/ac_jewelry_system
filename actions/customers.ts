@@ -248,3 +248,88 @@ export async function restoreCustomer(id: string): Promise<void> {
   revalidatePath("/dashboard");
   redirect("/customers?message=restored");
 }
+
+export type InlineCustomerResult =
+  | {
+      success: true;
+      customer: {
+        id: string;
+        name: string;
+        facebookName: string | null;
+      };
+    }
+  | {
+      success: false;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+    };
+
+export async function createCustomerInline(input: {
+  name: string;
+  facebookName?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+}): Promise<InlineCustomerResult> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  if (!authorization) {
+    return {
+      success: false,
+      message: "You do not have permission to perform this action.",
+    };
+  }
+
+  const parsed = createCustomerSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: "Please correct the highlighted fields.",
+      fieldErrors: getFieldErrors(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("customers")
+    .insert({
+      name: parsed.data.name,
+      facebook_name: parsed.data.facebookName,
+      phone: parsed.data.phone,
+      address: parsed.data.address,
+      notes: parsed.data.notes,
+      created_by: authorization.user.id,
+    })
+    .select("id, name, facebook_name")
+    .single();
+
+  if (error) {
+    console.error("Inline customer creation failed", {
+      code: error.code,
+      message: error.message,
+    });
+    return {
+      success: false,
+      message: error.message || "The customer could not be created.",
+    };
+  }
+
+  revalidatePath("/customers");
+  revalidatePath("/dashboard");
+  revalidatePath("/reservations/new");
+  await logActivity(supabase, {
+    action: "customer_created",
+    entityType: "customer",
+    entityId: data.id,
+    description: "Created customer " + parsed.data.name + " (inline).",
+    metadata: { name: parsed.data.name },
+  });
+
+  return {
+    success: true,
+    customer: {
+      id: data.id,
+      name: data.name,
+      facebookName: data.facebook_name,
+    },
+  };
+}

@@ -46,6 +46,9 @@ function logConfirmationRpcError(
 }
 
 function friendlyImportError(message: string): string {
+  if (message.includes("not_authorized")) {
+    return "You are not allowed to import orders.";
+  }
   if (message.includes("invalid_import_price")) {
     return "A row contains a price the database could not accept. Re-check the file and import again.";
   }
@@ -137,6 +140,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ result: data });
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        scope: "confirm_live_order_import_route_failed",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }),
+    );
     const message =
       error instanceof Error ? error.message : "The import could not be confirmed.";
     return NextResponse.json({ error: message }, { status: 400 });

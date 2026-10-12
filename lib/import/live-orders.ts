@@ -2,6 +2,29 @@ import { createHash } from "node:crypto";
 
 import ExcelJS from "exceljs";
 
+import { STOCK_CATEGORIES, type StockCategory } from "@/lib/constants/stock";
+
+export function inferStockCategory(name: string): StockCategory {
+  const lower = name.toLowerCase();
+  for (const cat of STOCK_CATEGORIES) {
+    if (cat === "Others") continue;
+    if (lower.includes(cat.toLowerCase())) {
+      return cat;
+    }
+  }
+  return "Others";
+}
+
+export type DetectedNewProduct = {
+  sku: string;
+  name: string;
+  category: StockCategory;
+  price: number;
+  initialQuantity: number;
+  valid: boolean;
+  validationError?: string;
+};
+
 export const LIVE_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 export const LIVE_IMPORT_MAX_ROWS = 2000;
 
@@ -47,6 +70,7 @@ export type ImportStockCandidate = {
   sku: string;
   name: string;
   price: number;
+  category?: string;
 };
 
 // Import is permissive by design: formatting differences never block a row.
@@ -57,7 +81,7 @@ export type ImportStockCandidate = {
 export type LiveImportResult =
   | "Ready"
   | "New Customer"
-  | "New Item"
+  | "New Product"
   | "Invalid Price"
   | "Invalid Downpayment"
   | "Invalid Quantity"
@@ -70,7 +94,7 @@ export type LiveImportPreviewRow = LiveImportRow & {
   customerMatch: "Matched" | "New Customer" | "Invalid Customer";
   itemMatch:
     | "Matched"
-    | "New Item"
+    | "New Product"
     | "Item Not Found"
     | "Item Ambiguous";
   result: LiveImportResult;
@@ -82,18 +106,21 @@ export type LiveImportPreviewRow = LiveImportRow & {
   // the raw cell was blank or invalid.
   unitPrice: number | null;
   downpaymentTotal: number | null;
+  category?: StockCategory;
 };
 
 export type LiveImportPreview = {
   fileName: string;
   fileHash: string;
   rows: LiveImportPreviewRow[];
+  detectedNewProducts: DetectedNewProduct[];
   summary: {
     rowsUploaded: number;
     validRows: number;
     invalidRows: number;
     existingCustomers: number;
     newCustomers: number;
+    newProducts: number;
     reservationsToCreate: number;
     itemsToCreate: number;
   };
@@ -462,8 +489,12 @@ export function buildLiveOrderPreview({
     const part = resolvedParts[index];
     const resolvedStock =
       part.stockMatches.length === 1 ? part.stockMatches[0] : undefined;
+    const isNewProductCandidate =
+      part.stockMatches.length === 0 &&
+      Boolean(part.row.itemCode) &&
+      part.row.itemName.trim().length >= 2;
     const canMerge =
-      resolvedStock !== undefined &&
+      (resolvedStock !== undefined || isNewProductCandidate) &&
       part.effectivePriceKey !== null &&
       !part.priceInvalid &&
       !part.downpaymentInvalid &&
@@ -472,8 +503,11 @@ export function buildLiveOrderPreview({
       lines.push({ parts: [part], mergeKey: null });
       return;
     }
+    const stockIdentifier = resolvedStock
+      ? resolvedStock.id
+      : "new:" + normalizeItemCode(part.row.itemCode);
     const mergeKey =
-      groupKey(part.row) + "|" + resolvedStock.id + "|" + part.effectivePriceKey;
+      groupKey(part.row) + "|" + stockIdentifier + "|" + part.effectivePriceKey;
     const existingIndex = lineIndexByMergeKey.get(mergeKey);
     if (existingIndex === undefined) {
       lineIndexByMergeKey.set(mergeKey, lines.length);
@@ -508,7 +542,7 @@ export function buildLiveOrderPreview({
     let itemMatch: LiveImportPreviewRow["itemMatch"] = "Matched";
     if (!normalizedRow.itemCode) itemMatch = "Item Not Found";
     else if (stockMatches.length > 1) itemMatch = "Item Ambiguous";
-    else if (stockMatches.length === 0) itemMatch = "New Item";
+    else if (stockMatches.length === 0) itemMatch = "New Product";
 
     const priceInvalid = parts.some((part) => part.priceInvalid);
     const downpaymentInvalid = parts.some((part) => part.downpaymentInvalid);
@@ -520,7 +554,10 @@ export function buildLiveOrderPreview({
     else if (downpaymentInvalid) result = "Invalid Downpayment";
     else if (quantityInvalid) result = "Invalid Quantity";
     else if (itemMatch === "Item Ambiguous" || itemMatch === "Item Not Found") result = itemMatch;
-    else if (itemMatch === "New Item") result = "New Item";
+    else if (itemMatch === "New Product") {
+      const hasValidName = normalizedRow.itemName.trim().length >= 2;
+      result = hasValidName ? "New Product" : "Item Not Found";
+    }
     else result = customerMatch === "New Customer" ? "New Customer" : "Ready";
 
     const mergedQuantity = parts.reduce(
@@ -549,6 +586,8 @@ export function buildLiveOrderPreview({
         )
       : null;
 
+    const rowCategory = stock?.category as StockCategory | undefined ?? inferStockCategory(normalizedRow.itemName);
+
     return {
       ...normalizedRow,
       itemName:
@@ -567,14 +606,38 @@ export function buildLiveOrderPreview({
       valid:
         result === "Ready" ||
         result === "New Customer" ||
-        result === "New Item",
+        result === "New Product",
       existingCustomer: customerMatches.length >= 1,
       mergedQuantity,
       mergedFromRows: parts.length,
       unitPrice,
       downpaymentTotal,
+      category: rowCategory,
     };
   });
+
+  const newProductMap = new Map<string, DetectedNewProduct>();
+  for (const row of rows) {
+    if (row.itemMatch === "New Product" && row.itemCode) {
+      const normalizedSku = normalizeItemCode(row.itemCode);
+      const existing = newProductMap.get(normalizedSku);
+      const name = row.itemName.trim();
+      const valid = name.length >= 2 && normalizedSku.length >= 1 && normalizedSku.length <= 64;
+      const initialQuantity = (existing?.initialQuantity ?? 0) + (row.mergedQuantity || 1);
+      const price = row.unitPrice ?? (parseLiveMoney(row.price) ? Number(parseLiveMoney(row.price)) : 0);
+
+      newProductMap.set(normalizedSku, {
+        sku: row.itemCode.trim(),
+        name: existing?.name || name,
+        category: existing?.category || inferStockCategory(name),
+        price: existing?.price || price,
+        initialQuantity,
+        valid,
+        validationError: valid ? undefined : "Product name must be at least 2 characters.",
+      });
+    }
+  }
+  const detectedNewProducts = [...newProductMap.values()];
 
   const groups = new Map<string, LiveImportPreviewRow[]>();
   for (const row of rows) {
@@ -591,12 +654,14 @@ export function buildLiveOrderPreview({
     fileName: parsed.fileName,
     fileHash: parsed.fileHash,
     rows,
+    detectedNewProducts,
     summary: {
       rowsUploaded: parsed.rows.length,
       validRows: validRows.length,
       invalidRows: rows.length - validRows.length,
       existingCustomers,
       newCustomers: validGroups.length - existingCustomers,
+      newProducts: detectedNewProducts.length,
       reservationsToCreate: validGroups.length,
       itemsToCreate: validRows.reduce((sum, row) => sum + row.mergedQuantity, 0),
     },
@@ -608,6 +673,7 @@ export function toConfirmationRows(preview: LiveImportPreview): unknown[] {
     facebookName: row.facebookName,
     itemCode: row.itemCode,
     itemName: row.itemName,
+    category: row.category ?? inferStockCategory(row.itemName),
     quantity: row.mergedQuantity || DEFAULT_IMPORT_QUANTITY,
     price: parseLiveMoney(row.price) ?? row.price,
     downpayment: parseLiveMoney(row.downpayment) ?? row.downpayment,

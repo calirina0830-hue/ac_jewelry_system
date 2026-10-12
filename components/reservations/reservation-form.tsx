@@ -8,12 +8,16 @@ import {
   createReservation,
   updateReservation,
 } from "@/actions/reservations";
+import { createCustomerInline } from "@/actions/customers";
+import { createStockItemInline } from "@/actions/stock";
 import { StockImage } from "@/components/stock/stock-image";
 import {
   FormSubmitButton,
   InputField,
+  SelectField,
   TextareaField,
 } from "@/components/ui/form-elements";
+import { STOCK_CATEGORIES, type StockCategory } from "@/lib/constants/stock";
 import { formatCurrency } from "@/lib/format";
 import {
   calculateReservationTotals,
@@ -91,6 +95,13 @@ export function ReservationForm({
     initialValue?.reservationDiscount ?? "0.00",
   );
   const downpayment = initialValue?.downpayment ?? "0.00";
+
+  // Modals for inline creation
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [customerModalInitialName, setCustomerModalInitialName] = useState("");
+
+  const [stockModalTargetKey, setStockModalTargetKey] = useState<string | null>(null);
+  const [stockModalInitialSearch, setStockModalInitialSearch] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -199,63 +210,99 @@ export function ReservationForm({
     );
   }
 
+  function handleOpenCustomerModal(prefill = "") {
+    setCustomerModalInitialName(prefill);
+    setIsCustomerModalOpen(true);
+  }
+
+  function handleCustomerCreated(newCustomer: ReservationCustomerOption) {
+    setCustomerOptions((current) => [newCustomer, ...current.filter((c) => c.id !== newCustomer.id)]);
+    setCustomerId(newCustomer.id);
+    setCustomerSearch("");
+    setIsCustomerModalOpen(false);
+  }
+
+  function handleOpenStockModal(itemKey: string, prefill = "") {
+    setStockModalTargetKey(itemKey);
+    setStockModalInitialSearch(prefill);
+  }
+
+  function handleStockCreated(newStock: ReservationStockOption, targetKey: string, price?: number) {
+    setStockOptions((current) => [newStock, ...current.filter((s) => s.id !== newStock.id)]);
+    updateItem(targetKey, {
+      stockItemId: newStock.id,
+      itemName: newStock.name,
+      sku: newStock.sku,
+      imagePath: newStock.imagePath,
+      unitPrice: price && price > 0 ? String(price) : "",
+      quantity: 1,
+      quantityInput: "1",
+      discount: "0.00",
+    });
+    setStockSearches((current) => ({ ...current, [targetKey]: "" }));
+    setStockModalTargetKey(null);
+  }
+
   return (
-    <form action={formAction} className="space-y-8" noValidate>
-      {initialValue && (
-        <>
-          <input name="id" type="hidden" value={initialValue.id} />
-          <input
-            name="updatedAt"
-            type="hidden"
-            value={initialValue.updatedAt}
-          />
-        </>
-      )}
-      <input name="items" type="hidden" value={serializedItems} />
-      <input name="downpayment" type="hidden" value={downpayment} />
+    <>
+      <form action={formAction} className="space-y-8" noValidate>
+        {initialValue && (
+          <>
+            <input name="id" type="hidden" value={initialValue.id} />
+            <input
+              name="updatedAt"
+              type="hidden"
+              value={initialValue.updatedAt}
+            />
+          </>
+        )}
+        <input name="items" type="hidden" value={serializedItems} />
+        <input name="downpayment" type="hidden" value={downpayment} />
 
-      {state.message && (
-        <div
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-          role="alert"
-        >
-          {state.message}
-        </div>
-      )}
-
-      <section>
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
-              Customer
-            </p>
-            <h2 className="mt-1 font-serif text-2xl text-ink">
-              Reservation customer
-            </h2>
-          </div>
-          <Link
-            className="text-sm font-semibold text-gold-dark hover:underline"
-            href="/customers/new"
+        {state.message && (
+          <div
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+            role="alert"
           >
-            Add customer
-          </Link>
-        </div>
-        <div className="mt-5 max-w-2xl">
-          <CustomerCombobox
-            error={customerId ? undefined : state.fieldErrors?.customerId?.[0]}
-            onClear={() => {
-              setCustomerId("");
-              setCustomerSearch("");
-            }}
-            onSearch={setCustomerSearch}
-            onSelect={(customer) => {
-              setCustomerId(customer.id);
-              setCustomerSearch("");
-            }}
-            options={visibleCustomers}
-            search={customerSearch}
-            selected={selectedCustomer}
-          />
+            {state.message}
+          </div>
+        )}
+
+        <section>
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
+                Customer
+              </p>
+              <h2 className="mt-1 font-serif text-2xl text-ink">
+                Reservation customer
+              </h2>
+            </div>
+            <button
+              className="text-sm font-semibold text-gold-dark hover:underline"
+              onClick={() => handleOpenCustomerModal(customerSearch)}
+              type="button"
+            >
+              + Add customer
+            </button>
+          </div>
+          <div className="mt-5 max-w-2xl">
+            <CustomerCombobox
+              error={customerId ? undefined : state.fieldErrors?.customerId?.[0]}
+              onAddNew={(search) => handleOpenCustomerModal(search)}
+              onClear={() => {
+                setCustomerId("");
+                setCustomerSearch("");
+              }}
+              onSearch={setCustomerSearch}
+              onSelect={(customer) => {
+                setCustomerId(customer.id);
+                setCustomerSearch("");
+              }}
+              options={visibleCustomers}
+              search={customerSearch}
+              selected={selectedCustomer}
+            />
           <label className="hidden" htmlFor="customerId">
             Customer identifier
             <select
@@ -392,10 +439,20 @@ export function ReservationForm({
 
                 <div className="mt-5 grid gap-4 md:grid-cols-[minmax(220px,2fr)_140px_110px_140px_150px]">
                   <div className="block text-sm font-semibold text-ink">
-                    <p>Jewelry item</p>
+                    <div className="flex items-center justify-between">
+                      <p>Jewelry item</p>
+                      <button
+                        className="text-xs font-semibold text-gold-dark hover:underline"
+                        onClick={() => handleOpenStockModal(item.key, stockSearch)}
+                        type="button"
+                      >
+                        + New product
+                      </button>
+                    </div>
                     <JewelryItemCombobox
                       error={Boolean(stockError)}
                       index={index}
+                      onAddNew={(search) => handleOpenStockModal(item.key, search)}
                       onSearch={(value) => {
                         setStockSearches((current) => ({
                           ...current,
@@ -635,18 +692,361 @@ export function ReservationForm({
         </div>
       </section>
 
-      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-6">
-        <FormSubmitButton>
-          {initialValue ? "Save reservation" : "Create reservation"}
-        </FormSubmitButton>
-        <Link
-          className="inline-flex h-11 items-center rounded-xl border border-border px-5 text-sm font-semibold text-ink hover:border-gold"
-          href={initialValue ? "/reservations/" + initialValue.id : "/reservations"}
-        >
-          Cancel
-        </Link>
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-6">
+          <FormSubmitButton>
+            {initialValue ? "Save reservation" : "Create reservation"}
+          </FormSubmitButton>
+          <Link
+            className="inline-flex h-11 items-center rounded-xl border border-border px-5 text-sm font-semibold text-ink hover:border-gold"
+            href={initialValue ? "/reservations/" + initialValue.id : "/reservations"}
+          >
+            Cancel
+          </Link>
+        </div>
+      </form>
+
+      {isCustomerModalOpen && (
+        <InlineCustomerModal
+          initialName={customerModalInitialName}
+          onClose={() => setIsCustomerModalOpen(false)}
+          onSuccess={handleCustomerCreated}
+        />
+      )}
+
+      {stockModalTargetKey && (
+        <InlineStockModal
+          initialSearch={stockModalInitialSearch}
+          onClose={() => setStockModalTargetKey(null)}
+          onSuccess={(stock, price) =>
+            handleStockCreated(stock, stockModalTargetKey, price)
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function InlineCustomerModal({
+  initialName,
+  onClose,
+  onSuccess,
+}: {
+  initialName: string;
+  onClose: () => void;
+  onSuccess: (customer: ReservationCustomerOption) => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [facebookName, setFacebookName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    setFieldErrors({});
+
+    try {
+      const result = await createCustomerInline({
+        name,
+        facebookName,
+        phone,
+        address,
+        notes,
+      });
+
+      if (!result.success) {
+        setError(result.message);
+        if (result.fieldErrors) setFieldErrors(result.fieldErrors);
+        return;
+      }
+
+      onSuccess({
+        id: result.customer.id,
+        name: result.customer.name,
+        facebookName: result.customer.facebookName,
+        phone: phone || null,
+      });
+    } catch (err) {
+      console.error(err);
+      setError("An unexpected error occurred while creating the customer.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-border bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border pb-4">
+          <h3 className="font-serif text-xl font-bold text-ink">Add New Customer</h3>
+          <button
+            className="text-muted hover:text-ink text-xl leading-none"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          <InputField
+            autoFocus
+            errors={fieldErrors.name}
+            label="Customer Name *"
+            name="name"
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full Name"
+            required
+            value={name}
+          />
+
+          <InputField
+            errors={fieldErrors.facebookName}
+            label="Facebook / CS Name (optional)"
+            name="facebookName"
+            onChange={(e) => setFacebookName(e.target.value)}
+            placeholder="Facebook handle or Livestream screen name"
+            value={facebookName}
+          />
+
+          <InputField
+            errors={fieldErrors.phone}
+            label="Phone Number (optional)"
+            name="phone"
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="09171234567"
+            value={phone}
+          />
+
+          <TextareaField
+            errors={fieldErrors.address}
+            label="Address (optional)"
+            name="address"
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Delivery address"
+            rows={2}
+            value={address}
+          />
+
+          <TextareaField
+            errors={fieldErrors.notes}
+            label="Notes (optional)"
+            name="notes"
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Customer preferences or remarks"
+            rows={2}
+            value={notes}
+          />
+
+          <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+            <button
+              className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-canvas"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-xl bg-gold px-5 py-2 text-sm font-bold text-ink shadow transition hover:bg-gold-light disabled:opacity-50"
+              disabled={loading}
+              type="submit"
+            >
+              {loading ? "Saving..." : "Save Customer"}
+            </button>
+          </div>
+        </form>
       </div>
-    </form>
+    </div>
+  );
+}
+
+function InlineStockModal({
+  initialSearch,
+  onClose,
+  onSuccess,
+}: {
+  initialSearch: string;
+  onClose: () => void;
+  onSuccess: (stock: ReservationStockOption, price?: number) => void;
+}) {
+  const [sku, setSku] = useState(initialSearch.toUpperCase());
+  const [name, setName] = useState(initialSearch);
+  const [category, setCategory] = useState<StockCategory>("Ring");
+  const [price, setPrice] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [description, setDescription] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    setFieldErrors({});
+
+    try {
+      const numericPrice = price ? Number(price) : undefined;
+      const numericQuantity = quantity ? Number(quantity) : 1;
+      const result = await createStockItemInline({
+        sku: sku.trim().toUpperCase(),
+        name: name.trim(),
+        category,
+        description: description.trim() || undefined,
+        price: numericPrice,
+        quantity: numericQuantity,
+      });
+
+      if (!result.success) {
+        setError(result.message);
+        if (result.fieldErrors) setFieldErrors(result.fieldErrors);
+        return;
+      }
+
+      onSuccess(
+        {
+          id: result.item.id,
+          sku: result.item.sku,
+          name: result.item.name,
+          imagePath: result.item.imagePath,
+        },
+        numericPrice,
+      );
+    } catch (err) {
+      console.error(err);
+      setError("An unexpected error occurred while creating the stock item.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-border bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border pb-4">
+          <h3 className="font-serif text-xl font-bold text-ink">Add New Jewelry Product</h3>
+          <button
+            className="text-muted hover:text-ink text-xl leading-none"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <InputField
+              autoFocus
+              errors={fieldErrors.sku}
+              label="Item Code / SKU *"
+              name="sku"
+              onChange={(e) => setSku(e.target.value.toUpperCase())}
+              placeholder="e.g. R001"
+              required
+              value={sku}
+            />
+
+            <SelectField
+              errors={fieldErrors.category}
+              label="Category *"
+              name="category"
+              onChange={(e) => setCategory(e.target.value as StockCategory)}
+              required
+              value={category}
+            >
+              {STOCK_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </SelectField>
+          </div>
+
+          <InputField
+            errors={fieldErrors.name}
+            label="Product Name *"
+            name="name"
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. 18K Gold Solitaire Ring"
+            required
+            value={name}
+          />
+
+          <div className="grid grid-cols-2 gap-4">
+            <InputField
+              errors={fieldErrors.price}
+              inputMode="decimal"
+              label="Selling Price"
+              min="0"
+              name="price"
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="0.00"
+              step="0.01"
+              type="number"
+              value={price}
+            />
+
+            <InputField
+              errors={fieldErrors.quantity}
+              inputMode="numeric"
+              label="Quantity"
+              min="1"
+              name="quantity"
+              onChange={(e) => setQuantity(e.target.value)}
+              placeholder="1"
+              step="1"
+              type="number"
+              value={quantity}
+            />
+          </div>
+
+          <TextareaField
+            errors={fieldErrors.description}
+            label="Description (optional)"
+            name="description"
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Material, carat, sizing, or other details"
+            rows={2}
+            value={description}
+          />
+
+          <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+            <button
+              className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-ink hover:bg-canvas"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-xl bg-gold px-5 py-2 text-sm font-bold text-ink shadow transition hover:bg-gold-light disabled:opacity-50"
+              disabled={loading}
+              type="submit"
+            >
+              {loading ? "Saving..." : "Save & Add to Reservation"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -658,6 +1058,7 @@ function CustomerCombobox({
   onSearch,
   onSelect,
   onClear,
+  onAddNew,
 }: {
   search: string;
   selected?: ReservationCustomerOption;
@@ -666,6 +1067,7 @@ function CustomerCombobox({
   onSearch: (value: string) => void;
   onSelect: (option: ReservationCustomerOption) => void;
   onClear: () => void;
+  onAddNew?: (search: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -792,6 +1194,20 @@ function CustomerCombobox({
           id="customer-options"
           role="listbox"
         >
+          {onAddNew && search.trim() && (
+            <button
+              className="flex w-full items-center gap-2 rounded-lg border-b border-border/50 px-3 py-2.5 text-left font-semibold text-gold-dark hover:bg-gold-soft"
+              onClick={() => {
+                setOpen(false);
+                onAddNew(search.trim());
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+              type="button"
+            >
+              <span className="text-base leading-none">+</span>
+              <span className="text-xs">Create customer &quot;{search.trim()}&quot;</span>
+            </button>
+          )}
           {options.length ? (
             options.map((option, optionIndex) => (
               <button
@@ -819,9 +1235,22 @@ function CustomerCombobox({
               </button>
             ))
           ) : (
-            <p className="px-3 py-5 text-center text-xs text-muted">
-              No matching customers.
-            </p>
+            <div className="px-3 py-4 text-center">
+              <p className="text-xs text-muted">No matching customers.</p>
+              {onAddNew && (
+                <button
+                  className="mt-2 text-xs font-bold text-gold-dark hover:underline"
+                  onClick={() => {
+                    setOpen(false);
+                    onAddNew(search.trim());
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  type="button"
+                >
+                  + Add &quot;{search.trim() || "New Customer"}&quot; now
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -837,6 +1266,7 @@ function JewelryItemCombobox({
   error,
   onSearch,
   onSelect,
+  onAddNew,
 }: {
   index: number;
   search: string;
@@ -845,6 +1275,7 @@ function JewelryItemCombobox({
   error: boolean;
   onSearch: (value: string) => void;
   onSelect: (option: ReservationStockOption) => void;
+  onAddNew?: (search: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -920,6 +1351,20 @@ function JewelryItemCombobox({
           id={"stock-options-" + index}
           role="listbox"
         >
+          {onAddNew && search.trim() && (
+            <button
+              className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left font-semibold text-gold-dark hover:bg-gold-soft"
+              onClick={() => {
+                setOpen(false);
+                onAddNew(search.trim());
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+              type="button"
+            >
+              <span className="text-base leading-none">+</span>
+              <span className="text-xs">Create product &quot;{search.trim()}&quot;</span>
+            </button>
+          )}
           {options.length ? (
             options.map((option, optionIndex) => (
               <button
@@ -951,9 +1396,22 @@ function JewelryItemCombobox({
               </button>
             ))
           ) : (
-            <p className="px-3 py-5 text-center text-xs font-normal text-muted">
-              No matching jewelry items.
-            </p>
+            <div className="px-3 py-4 text-center">
+              <p className="text-xs font-normal text-muted">No matching jewelry items.</p>
+              {onAddNew && (
+                <button
+                  className="mt-2 text-xs font-bold text-gold-dark hover:underline"
+                  onClick={() => {
+                    setOpen(false);
+                    onAddNew(search.trim());
+                  }}
+                  onMouseDown={(event) => event.preventDefault()}
+                  type="button"
+                >
+                  + Create product &quot;{search.trim() || "New Item"}&quot; now
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -988,3 +1446,4 @@ function SummaryRow({
     </div>
   );
 }
+

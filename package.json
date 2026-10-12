@@ -8,10 +8,10 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --import ./tests/register-aliases.mjs --test tests/*.test.mjs",
-    "test:customer-validation": "node --experimental-strip-types --test tests/customer-validation.test.mjs",
-    "test:reservations": "node --experimental-strip-types --import ./tests/register-aliases.mjs --test tests/reservations.test.mjs",
-    "test:phase4": "node --experimental-strip-types --import ./tests/register-aliases.mjs --test tests/phase4.test.mjs"
+    "test": "tsx --import ./tests/register-aliases.mjs --test tests/*.test.mjs",
+    "test:customer-validation": "tsx --test tests/customer-validation.test.mjs",
+    "test:reservations": "tsx --import ./tests/register-aliases.mjs --test tests/reservations.test.mjs",
+    "test:phase4": "tsx --import ./tests/register-aliases.mjs --test tests/phase4.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
@@ -35,6 +35,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.1",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.23.15",
     "typescript": "6.0.3"
   }
 }

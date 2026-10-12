@@ -461,3 +461,150 @@ test("confirmation RPC mirrors preview normalization and reuse rules", async () 
   assert.match(migration, /if v_group_downpayment > 0 then/);
   assert.match(migration, /record_reservation_payment\(/);
 });
+
+test("regression: 20261012 fix migration grants normalize_live_identity and authorizes admin roles", async () => {
+  const fixMigration = await readFile(
+    new URL("../supabase/migrations/202610120001_fix_live_order_import_confirmation.sql", import.meta.url),
+    "utf8",
+  );
+
+  // 1. Grants execute on normalize_live_identity to authenticated and anon
+  assert.match(
+    fixMigration,
+    /grant execute on function public\.normalize_live_identity\(text\) to authenticated, anon;/i,
+  );
+
+  // 2. Maps owner and developer in current_profile_role() to admin
+  assert.match(
+    fixMigration,
+    /when role::text in \('owner', 'developer'\) then 'admin'::public\.profile_role/i,
+  );
+
+  // 3. confirm_live_order_import authorizes owner and developer
+  assert.match(
+    fixMigration,
+    /public\.current_profile_role\(\)::text not in \('admin', 'staff'\) and not public\.is_admin\(\)/,
+  );
+
+  // 4. record_reservation_payment authorizes owner and developer
+  assert.match(
+    fixMigration,
+    /create or replace function public\.record_reservation_payment/,
+  );
+
+  // 5. Preserves quantity merging, payment ledger, status history, and locking
+  assert.match(fixMigration, /for update;/);
+  assert.match(fixMigration, /quantity = quantity \+ v_quantity/);
+  assert.match(fixMigration, /line_total = unit_price \* \(quantity \+ v_quantity\)/);
+  assert.match(fixMigration, /record_reservation_payment\(/);
+  assert.match(fixMigration, /insert into public\.reservation_status_history/);
+});
+
+test("new customer with existing product creates customer automatically and identifies as New Customer", () => {
+  const result = preview([row({ facebookName: "BRAND_NEW_USER", itemCode: "R001" })]);
+  assert.equal(result.rows[0].customerMatch, "New Customer");
+  assert.equal(result.rows[0].itemMatch, "Matched");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(result.rows[0].result, "New Customer");
+  assert.equal(result.summary.newCustomers, 1);
+  assert.equal(result.summary.newProducts, 0);
+});
+
+test("existing customer with new product identifies as New Product and captures detected product", () => {
+  const result = preview([
+    row({
+      facebookName: "CALI",
+      itemCode: "NEW-PENDANT-99",
+      itemName: "Diamond Pendant",
+      price: "4500",
+      quantity: "2",
+    }),
+  ]);
+  assert.equal(result.rows[0].customerMatch, "Matched");
+  assert.equal(result.rows[0].itemMatch, "New Product");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(result.rows[0].result, "New Product");
+  assert.equal(result.summary.newCustomers, 0);
+  assert.equal(result.summary.newProducts, 1);
+  assert.equal(result.detectedNewProducts.length, 1);
+  assert.equal(result.detectedNewProducts[0].sku, "NEW-PENDANT-99");
+  assert.equal(result.detectedNewProducts[0].name, "Diamond Pendant");
+  assert.equal(result.detectedNewProducts[0].category, "Pendant");
+  assert.equal(result.detectedNewProducts[0].price, 4500);
+  assert.equal(result.detectedNewProducts[0].initialQuantity, 2);
+  assert.equal(result.detectedNewProducts[0].valid, true);
+});
+
+test("new customer with new product identifies as New Product and marks both for creation", () => {
+  const result = preview([
+    row({
+      facebookName: "FRESH_BUYER",
+      itemCode: "GOLD-B-01",
+      itemName: "Gold Bracelet",
+      price: "8500",
+      quantity: "1",
+    }),
+  ]);
+  assert.equal(result.rows[0].customerMatch, "New Customer");
+  assert.equal(result.rows[0].itemMatch, "New Product");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(result.rows[0].result, "New Product");
+  assert.equal(result.summary.newCustomers, 1);
+  assert.equal(result.summary.newProducts, 1);
+});
+
+test("repeated rows of new product and customer merge without creating duplicates", () => {
+  const result = preview([
+    row({
+      facebookName: "FRESH_BUYER",
+      itemCode: "GOLD-B-01",
+      itemName: "Gold Bracelet",
+      price: "8500",
+      quantity: "2",
+      rowNumber: 2,
+    }),
+    row({
+      facebookName: "fresh_buyer",
+      itemCode: "gold-b-01",
+      itemName: "Gold Bracelet",
+      price: "8,500",
+      quantity: "3",
+      rowNumber: 3,
+    }),
+  ]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].mergedQuantity, 5);
+  assert.equal(result.summary.newCustomers, 1);
+  assert.equal(result.summary.newProducts, 1);
+  assert.equal(result.detectedNewProducts.length, 1);
+  assert.equal(result.detectedNewProducts[0].initialQuantity, 5);
+});
+
+test("missing required product details (<2 chars name) flags detected product as invalid and rejects row", () => {
+  const result = preview([
+    row({
+      facebookName: "CALI",
+      itemCode: "BAD-01",
+      itemName: "x",
+      price: "1000",
+    }),
+  ]);
+  assert.equal(result.rows[0].itemMatch, "New Product");
+  assert.equal(result.rows[0].valid, false);
+  assert.equal(result.rows[0].result, "Item Not Found");
+  assert.equal(result.detectedNewProducts[0].valid, false);
+  assert.equal(result.detectedNewProducts[0].validationError, "Product name must be at least 2 characters.");
+});
+
+test("ambiguous item codes remain rejected", () => {
+  const result = preview([row({ itemCode: "DUP" })], {
+    stockItems: [
+      { id: "stock-1", sku: "DUP", name: "Ring 1", price: 1000 },
+      { id: "stock-2", sku: "dup", name: "Ring 2", price: 1000 },
+    ],
+  });
+  assert.equal(result.rows[0].itemMatch, "Item Ambiguous");
+  assert.equal(result.rows[0].valid, false);
+  assert.equal(result.rows[0].result, "Item Ambiguous");
+});
+
