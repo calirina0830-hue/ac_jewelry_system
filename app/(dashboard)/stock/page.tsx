@@ -75,6 +75,15 @@ export default async function StockPage({ searchParams }: StockPageProps) {
   } = await query
     .order(filters.sort, { ascending: filters.direction === "asc" })
     .range(from, to);
+  const { data: categoryRows } = await supabase
+    .from("stock_items")
+    .select("category");
+  const categories = Array.from(
+    new Set([
+      ...STOCK_CATEGORIES,
+      ...(categoryRows ?? []).map((row) => row.category),
+    ]),
+  ).sort((a, b) => a.localeCompare(b));
   const pageCount = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const queryValues = {
     q: search || undefined,
@@ -128,7 +137,7 @@ export default async function StockPage({ searchParams }: StockPageProps) {
           name="category"
         >
           <option value="all">All categories</option>
-          {STOCK_CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <option key={category} value={category}>
               {category}
             </option>

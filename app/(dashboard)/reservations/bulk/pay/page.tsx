@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PaymentEvidenceInput } from "@/components/reservations/payment-evidence-input";
 import { PaymentFormActions } from "@/components/reservations/payment-form-actions";
 import { PaymentUploadForm } from "@/components/reservations/payment-upload-form";
+import { RecordPaymentCard } from "@/components/reservations/record-payment-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
-import { formatCurrency } from "@/lib/format";
 import { canRecordReservationPayment } from "@/lib/reservations/payment-eligibility";
 import { parseBulkPaymentIds } from "@/lib/reservations/payment-selection";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +21,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   "evidence-upload-failed": "Payment evidence could not be uploaded.",
   "pricing-incomplete": "Complete item pricing before recording a payment.",
   overpayment: "A payment cannot exceed the reservation's remaining balance.",
+  "deduction-exceeds-paid": "A deduction cannot exceed the total already paid.",
   "stale-reservation": "A reservation changed after this page loaded. Reload and review it.",
   "payment-failed": "No payments were recorded. Review the entries and try again.",
 };
@@ -88,54 +88,22 @@ export default async function BulkPaymentPage({
         {ordered.map((reservation) => {
           const customer = customerById.get(reservation.customer_id);
           return (
-            <section className="rounded-3xl border border-border bg-white p-6 shadow-card" key={reservation.id}>
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.15em] text-gold-dark">{reservation.reservation_no}</p>
-                  <h2 className="mt-1 font-serif text-2xl text-ink">{customer?.name ?? "Customer unavailable"}</h2>
-                  {customer?.facebook_name && <p className="mt-1 text-xs text-muted">Facebook / CS: {customer.facebook_name}</p>}
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-right">
-                  <div>
-                    <p className="text-xs text-muted">Reservation total</p>
-                    <p className="mt-1 text-sm font-bold text-ink">{formatCurrency(Number(reservation.total))}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted">Current total paid</p>
-                    <p className="mt-1 text-sm font-bold text-ink">{formatCurrency(Number(reservation.downpayment))}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted">Current remaining balance</p>
-                    <p className="mt-1 text-lg font-black text-ink">{formatCurrency(Number(reservation.balance))}</p>
-                  </div>
-                </div>
-              </div>
-              <input name={"updatedAt:" + reservation.id} type="hidden" value={reservation.updated_at} />
-              <div className="mt-5 grid gap-5 md:grid-cols-2">
-                <label className="block text-sm font-semibold text-ink">
-                  Payment amount
-                  <input className="mt-2 h-11 w-full rounded-xl border border-border px-4 font-normal outline-none focus:border-gold" defaultValue={Number(reservation.balance).toFixed(2)} inputMode="decimal" max={Number(reservation.balance).toFixed(2)} min="0.01" name={"amount:" + reservation.id} required step="0.01" type="number" />
-                </label>
-                <label className="block text-sm font-semibold text-ink">
-                  Payment method <span className="font-normal text-muted">(optional)</span>
-                  <input className="mt-2 h-11 w-full rounded-xl border border-border px-4 font-normal outline-none focus:border-gold" maxLength={120} name={"paymentMethod:" + reservation.id} placeholder="Cash, GCash, bank transfer" />
-                </label>
-                <label className="block text-sm font-semibold text-ink">
-                  Reference number <span className="font-normal text-muted">(optional)</span>
-                  <input className="mt-2 h-11 w-full rounded-xl border border-border px-4 font-normal outline-none focus:border-gold" maxLength={200} name={"referenceNo:" + reservation.id} />
-                </label>
-                <PaymentEvidenceInput key={reservation.id} name={"evidence:" + reservation.id} />
-                <label className="block text-sm font-semibold text-ink md:col-span-2">
-                  Payment notes <span className="font-normal text-muted">(optional)</span>
-                  <textarea className="mt-2 min-h-24 w-full rounded-xl border border-border px-4 py-3 font-normal outline-none focus:border-gold" maxLength={2000} name={"notes:" + reservation.id} />
-                </label>
-              </div>
-              {!reservation.pricing_complete && (
-                <Link className="mt-4 inline-flex text-sm font-bold text-gold-dark hover:underline" href={"/reservations/" + reservation.id + "/edit"}>
-                  Complete item pricing
-                </Link>
-              )}
-            </section>
+            <RecordPaymentCard
+              key={reservation.id}
+              customer={{
+                name: customer?.name ?? null,
+                facebook_name: customer?.facebook_name ?? null,
+              }}
+              reservation={{
+                id: reservation.id,
+                reservation_no: reservation.reservation_no,
+                total: Number(reservation.total),
+                downpayment: Number(reservation.downpayment),
+                balance: Number(reservation.balance),
+                updated_at: reservation.updated_at,
+                pricing_complete: reservation.pricing_complete,
+              }}
+            />
           );
         })}
         <PaymentFormActions

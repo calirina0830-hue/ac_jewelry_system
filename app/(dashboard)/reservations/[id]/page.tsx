@@ -7,8 +7,11 @@ import {
   restoreReservation,
   transitionReservationStatus,
 } from "@/actions/reservations";
+import { OrderDateEditor } from "@/components/reservations/order-date-editor";
 import { PaymentEvidenceViewer } from "@/components/reservations/payment-evidence-viewer";
+import { ReleaseStatusBadge } from "@/components/reservations/release-status";
 import { ReservationStatus } from "@/components/reservations/reservation-status";
+import { ShippingPanel } from "@/components/reservations/shipping-panel";
 import { StockImage } from "@/components/stock/stock-image";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,6 +22,7 @@ import {
   canRecordReservationPayment,
   needsReservationPricing,
 } from "@/lib/reservations/payment-eligibility";
+import { getReleaseDisplayStatus } from "@/lib/reservations/release";
 import { createClient } from "@/lib/supabase/server";
 import { getReservationTransitions } from "@/lib/reservations/status";
 import { getPaymentEvidenceUrl } from "@/lib/storage/payment-evidence";
@@ -81,6 +85,107 @@ export default async function ReservationDetailsPage({
       .eq("reservation_id", reservation.id)
       .order("recorded_at", { ascending: false }),
   ]);
+
+  const { data: shipments } = await supabase
+    .from("reservation_shipments")
+    .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
+    .eq("reservation_id", reservation.id)
+    .order("created_at", { ascending: false });
+  const shipmentIds = (shipments ?? []).map((shipment) => shipment.id);
+  const { data: shipmentItems } = shipmentIds.length
+    ? await supabase
+        .from("reservation_shipment_items")
+        .select("shipment_id, reservation_item_id, quantity")
+        .in("shipment_id", shipmentIds)
+    : { data: [] };
+  const shipmentStatusById = new Map(
+    (shipments ?? []).map((shipment) => [shipment.id, shipment.status]),
+  );
+  const shippedByItem = new Map<string, number>();
+  const pendingByItem = new Map<string, number>();
+  const shipmentAggregates = new Map<
+    string,
+    { itemCount: number; totalQuantity: number }
+  >();
+  for (const shipmentItem of shipmentItems ?? []) {
+    const quantity = Number(shipmentItem.quantity);
+    const status = shipmentStatusById.get(shipmentItem.shipment_id);
+    if (status === "shipped") {
+      shippedByItem.set(
+        shipmentItem.reservation_item_id,
+        (shippedByItem.get(shipmentItem.reservation_item_id) ?? 0) + quantity,
+      );
+    } else if (status === "pending") {
+      pendingByItem.set(
+        shipmentItem.reservation_item_id,
+        (pendingByItem.get(shipmentItem.reservation_item_id) ?? 0) + quantity,
+      );
+    }
+    const aggregate = shipmentAggregates.get(shipmentItem.shipment_id) ?? {
+      itemCount: 0,
+      totalQuantity: 0,
+    };
+    aggregate.itemCount += 1;
+    aggregate.totalQuantity += quantity;
+    shipmentAggregates.set(shipmentItem.shipment_id, aggregate);
+  }
+  const shippingItems = (items ?? []).map((item) => ({
+    id: item.id,
+    label: item.sku + " - " + item.item_name + " - " + item.category,
+    quantity: Number(item.quantity),
+    unitPrice: Number(item.unit_price),
+    discount: Number(item.discount ?? 0),
+    orderedAt: item.ordered_at,
+    shipped: shippedByItem.get(item.id) ?? 0,
+    pending: pendingByItem.get(item.id) ?? 0,
+  }));
+  const shipmentRows = (shipments ?? []).map((shipment) => {
+    const aggregate = shipmentAggregates.get(shipment.id) ?? {
+      itemCount: 0,
+      totalQuantity: 0,
+    };
+    return {
+      id: shipment.id,
+      shipmentNo: shipment.shipment_no,
+      status: shipment.status,
+      createdAt: shipment.created_at,
+      shippedAt: shipment.shipped_at,
+      itemCount: aggregate.itemCount,
+      totalQuantity: aggregate.totalQuantity,
+      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+      notes: shipment.notes,
+      cancelReason: shipment.cancel_reason,
+    };
+  });
+  const usedDownpayment = (shipments ?? [])
+    .filter((shipment) => shipment.status === "shipped")
+    .reduce(
+      (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
+      0,
+    );
+  const reservedDownpayment = (shipments ?? [])
+    .filter((shipment) => shipment.status === "pending")
+    .reduce(
+      (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
+      0,
+    );
+  const totalQuantity = (items ?? []).reduce(
+    (total, item) => total + Number(item.quantity),
+    0,
+  );
+  const releasedQuantity = [...shippedByItem.values()].reduce(
+    (total, quantity) => total + quantity,
+    0,
+  );
+  const releaseStatus = getReleaseDisplayStatus(
+    releasedQuantity,
+    totalQuantity,
+  );
+  const canShip =
+    canWrite &&
+    !reservation.archived_at &&
+    ["reserved", "paid", "delivered"].includes(reservation.status);
+
   const transitions = getReservationTransitions(
     profile?.role,
     reservation.status,
@@ -254,18 +359,26 @@ export default async function ReservationDetailsPage({
 
           <section className="overflow-hidden rounded-3xl border border-border bg-white shadow-card">
             <div className="border-b border-border px-6 py-5 sm:px-8">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
-                Jewelry items
-              </p>
-              <h2 className="mt-1 font-serif text-2xl text-ink">
-                {items?.length ?? 0} reserved {items?.length === 1 ? "piece" : "pieces"}
-              </h2>
+              <div className="flex flex-wrap items-center gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
+                    Jewelry items
+                  </p>
+                  <h2 className="mt-1 font-serif text-2xl text-ink">
+                    {items?.length ?? 0} reserved {items?.length === 1 ? "piece" : "pieces"}
+                  </h2>
+                </div>
+                <div className="ml-auto">
+                  <ReleaseStatusBadge status={releaseStatus} />
+                </div>
+              </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px] border-collapse text-left">
+              <table className="w-full min-w-[1000px] border-collapse text-left">
                 <thead className="bg-canvas text-[11px] uppercase tracking-[0.14em] text-muted">
                   <tr>
                     <th className="px-6 py-4 font-bold">Item</th>
+                    <th className="px-5 py-4 font-bold">Order date</th>
                     <th className="px-5 py-4 font-bold">Unit price</th>
                     <th className="px-5 py-4 font-bold">Quantity</th>
                     <th className="px-5 py-4 font-bold">Discount</th>
@@ -273,24 +386,47 @@ export default async function ReservationDetailsPage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {items?.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <StockImage alt={item.item_name} url={getStockImageUrl(item.image_path)} />
-                          <span className="font-semibold text-ink">{item.item_name}</span>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">{formatCurrency(Number(item.unit_price))}</td>
-                      <td className="px-5 py-4 text-sm font-semibold text-ink">{item.quantity}</td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(Number(item.discount))}</td>
-                      <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-bold text-ink">{formatCurrency(Number(item.line_total))}</td>
-                    </tr>
-                  ))}
+                  {items?.map((item) => {
+                    return (
+                      <tr key={item.id}>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <StockImage alt={item.item_name} url={getStockImageUrl(item.image_path)} />
+                            <span className="font-semibold text-ink">{item.item_name}</span>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
+                          <OrderDateEditor
+                            canEdit={isAdmin}
+                            orderedAt={item.ordered_at}
+                            reservationId={reservation.id}
+                            reservationItemId={item.id}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">{formatCurrency(Number(item.unit_price))}</td>
+                        <td className="px-5 py-4 text-sm font-semibold text-ink">{item.quantity}</td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(Number(item.discount))}</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-bold text-ink">{formatCurrency(Number(item.line_total))}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </section>
+
+          <ShippingPanel
+            canShip={canShip}
+            canWrite={canWrite}
+            downpayment={displayedPaidAmount}
+            isAdmin={isAdmin}
+            items={shippingItems}
+            reservationId={reservation.id}
+            reservationNo={reservation.reservation_no}
+            reservedDownpayment={reservedDownpayment}
+            shipments={shipmentRows}
+            usedDownpayment={usedDownpayment}
+          />
 
           <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
             <InfoItem label="Reservation notes">
@@ -459,6 +595,33 @@ export default async function ReservationDetailsPage({
                 </div>
               )}
           </dl>
+          {displayedPaidAmount > 0 && (
+            <dl className="mt-5 space-y-3 rounded-2xl border border-border bg-canvas/40 p-4 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-xs font-bold uppercase tracking-[0.15em] text-muted">
+                  Downpayment breakdown
+                </dt>
+                <ReleaseStatusBadge status={releaseStatus} />
+              </div>
+              <MoneyRow label="Used on releases" value={usedDownpayment} />
+              {reservedDownpayment > 0 && (
+                <MoneyRow
+                  label="Reserved by open release"
+                  value={reservedDownpayment}
+                />
+              )}
+              <MoneyRow
+                label="Remaining unapplied"
+                strong
+                value={Math.max(
+                  displayedPaidAmount -
+                    usedDownpayment -
+                    reservedDownpayment,
+                  0,
+                )}
+              />
+            </dl>
+          )}
           <dl className="mt-6 space-y-5 border-t border-border pt-6">
             <RecordItem label="Reserved at" value={formatDateTime(reservation.reserved_at)} />
             {reservation.paid_at && <RecordItem label="Paid at" value={formatDateTime(reservation.paid_at)} />}

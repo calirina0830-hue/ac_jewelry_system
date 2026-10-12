@@ -12,5 +12,5 @@ export const RESERVATION_STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelled" },
 ] as const;
 
-export const MAX_RESERVATION_ITEMS = 50;
+export const MAX_RESERVATION_ITEMS = 500;
 export const MAX_MONEY_CENTS = 999_999_999_999;

@@ -6,7 +6,6 @@ import {
   PAYMENT_EVIDENCE_MIME_TYPES,
 } from "@/lib/constants/payments";
 import { MAX_MONEY_CENTS } from "@/lib/constants/reservations";
-import { parseMoneyToCents } from "@/lib/reservations/money";
 
 const optionalText = (maximum: number, message: string) =>
   z
@@ -15,19 +14,37 @@ const optionalText = (maximum: number, message: string) =>
     .max(maximum, message)
     .transform((value) => value || null);
 
+function parseSignedMoneyCents(value: string): number | null {
+  const match = /^(-?)(\d{1,10})(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const sign = match[1] === "-" ? -1 : 1;
+  const cents =
+    sign * (Number(match[2]) * 100 + Number((match[3] ?? "").padEnd(2, "0")));
+  return Number.isSafeInteger(cents) && Math.abs(cents) <= MAX_MONEY_CENTS
+    ? cents
+    : null;
+}
+
 export const paymentEntrySchema = z.object({
   reservationId: z.string().uuid(),
   expectedUpdatedAt: z.iso.datetime({ offset: true }),
   amount: z
     .string()
     .trim()
-    .regex(/^\d{1,10}(?:\.\d{1,2})?$/, "Enter a valid payment amount.")
+    .regex(/^-?\d{1,10}(?:\.\d{1,2})?$/, "Enter a valid payment amount.")
     .transform((value, context) => {
-      const cents = parseMoneyToCents(value);
-      if (cents === null || cents < 1 || cents > MAX_MONEY_CENTS) {
+      const cents = parseSignedMoneyCents(value);
+      if (cents === null) {
         context.addIssue({
           code: "custom",
-          message: "Payment amount must be greater than zero.",
+          message: "Enter a valid payment amount.",
+        });
+        return z.NEVER;
+      }
+      if (cents === 0) {
+        context.addIssue({
+          code: "custom",
+          message: "Payment amount cannot be zero.",
         });
         return z.NEVER;
       }

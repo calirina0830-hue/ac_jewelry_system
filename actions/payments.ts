@@ -285,11 +285,13 @@ export async function recordReservationPayments(
     const message = String(getErrorField(rpcError, "message") ?? "");
     const code = message.includes("pricing_incomplete")
       ? "pricing-incomplete"
-      : message.includes("payment_exceeds_balance")
-        ? "overpayment"
-        : message.includes("stale_reservation")
-          ? "stale-reservation"
-          : "payment-failed";
+      : message.includes("deduction_exceeds_paid")
+        ? "deduction-exceeds-paid"
+        : message.includes("payment_exceeds_balance")
+          ? "overpayment"
+          : message.includes("stale_reservation")
+            ? "stale-reservation"
+            : "payment-failed";
     return { status: "error", redirectTo: paymentUrl(ids, code) };
   }
 

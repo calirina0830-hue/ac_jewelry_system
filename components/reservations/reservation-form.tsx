@@ -47,6 +47,7 @@ function createBlankItem(): DraftItem {
     unitPrice: "",
     itemName: "",
     sku: "",
+    category: "",
     imagePath: null,
   };
 }
@@ -384,6 +385,8 @@ export function ReservationForm({
                 .filter(Boolean),
             );
             const itemName = selectedStock?.name ?? item.itemName;
+            const itemSku = selectedStock?.sku ?? item.sku;
+            const itemCategory = selectedStock?.category ?? item.category;
             const itemImagePath = selectedStock?.imagePath ?? item.imagePath;
             const stockError = item.stockItemId
               ? undefined
@@ -418,6 +421,11 @@ export function ReservationForm({
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-ink">
                         {itemName || "Select a stock item"}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted">
+                        {itemSku ? "SKU " + itemSku : "SKU —"}
+                        {" · "}
+                        {itemCategory ? "Category " + itemCategory : "Category —"}
                       </p>
                       <p className="mt-0.5 text-xs text-muted">Item {index + 1}</p>
                     </div>
@@ -476,6 +484,7 @@ export function ReservationForm({
                               : "",
                           itemName: selected.name,
                           sku: selected.sku,
+                          category: selected.category,
                           imagePath: selected.imagePath,
                         });
                       }}
@@ -503,6 +512,7 @@ export function ReservationForm({
                           unitPrice: "",
                           itemName: selected?.name ?? "",
                           sku: selected?.sku ?? "",
+                          category: selected?.category ?? "",
                           imagePath: selected?.imagePath ?? null,
                         });
                       }}

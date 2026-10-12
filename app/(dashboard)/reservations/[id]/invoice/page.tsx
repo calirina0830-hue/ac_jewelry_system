@@ -7,17 +7,17 @@ import {
   InvoiceActionBar,
   InvoiceNotes,
 } from "@/components/reservations/invoice-controls";
-import { PrintInvoiceButton } from "@/components/reservations/print-invoice-button";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { logActivity } from "@/lib/activity";
 import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, formatOrderDateTime } from "@/lib/format";
 import {
   getInvoiceStatusLabel,
   getInvoiceTotals,
 } from "@/lib/reservations/invoice";
 import { getReservationTransitions } from "@/lib/reservations/status";
+import { computeReleaseLedger } from "@/lib/reservations/release";
 import { createClient } from "@/lib/supabase/server";
 import { reservationIdSchema } from "@/lib/validation/reservations";
 
@@ -43,27 +43,67 @@ export default async function ReservationInvoicePage({
 
   if (!reservation) notFound();
 
-  const [{ data: items }, { data: payments }, { data: customer }] =
-    await Promise.all([
-      supabase
-        .from("reservation_items")
-        .select(
-          "id, sku, category, item_name, quantity, unit_price, discount, line_total, created_at",
-        )
-        .eq("reservation_id", reservation.id)
-        .order("created_at"),
-      supabase
-        .from("reservation_payments")
-        .select("amount, voided_at")
-        .eq("reservation_id", reservation.id),
-      supabase
-        .from("customers")
-        .select("name, facebook_name, phone, address")
-        .eq("id", reservation.customer_id)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: items },
+    { data: payments },
+    { data: customer },
+    { data: shipments },
+  ] = await Promise.all([
+    supabase
+      .from("reservation_items")
+      .select(
+        "id, sku, category, item_name, quantity, unit_price, discount, line_total, ordered_at, created_at",
+      )
+      .eq("reservation_id", reservation.id)
+      .order("created_at"),
+    supabase
+      .from("reservation_payments")
+      .select("amount, voided_at")
+      .eq("reservation_id", reservation.id),
+    supabase
+      .from("customers")
+      .select("name, facebook_name, phone, address")
+      .eq("id", reservation.customer_id)
+      .maybeSingle(),
+    supabase
+      .from("reservation_shipments")
+      .select("id, status, downpayment_applied")
+      .eq("reservation_id", reservation.id),
+  ]);
 
   if (!items) notFound();
+
+  const shipmentIdForReservation =
+    shipments?.map((shipment) => shipment.id) ?? [];
+  const { data: shipmentItems } =
+    shipmentIdForReservation.length > 0
+      ? await supabase
+          .from("reservation_shipment_items")
+          .select("shipment_id, reservation_item_id, quantity")
+          .in("shipment_id", shipmentIdForReservation)
+          .order("created_at")
+      : { data: [] };
+  const safeShipmentItems = shipmentItems ?? [];
+
+  const releaseLedger = computeReleaseLedger(
+    (items ?? []).map((item) => ({
+      id: item.id,
+      description: item.sku + " - " + item.item_name + " - " + item.category,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unit_price),
+      discount: Number(item.discount ?? 0),
+    })),
+    (shipments ?? []).map((shipment) => ({
+      id: shipment.id,
+      status: shipment.status,
+      downpayment_applied: Number(shipment.downpayment_applied ?? 0),
+    })),
+    safeShipmentItems.map((line) => ({
+      shipment_id: line.shipment_id,
+      reservation_item_id: line.reservation_item_id,
+      quantity: Number(line.quantity),
+    })),
+  );
 
   await logActivity(supabase, {
     action: "invoice_viewed",
@@ -79,10 +119,55 @@ export default async function ReservationInvoicePage({
         .reduce((total, payment) => total + Number(payment.amount), 0)
     : undefined;
   const totals = getInvoiceTotals(reservation, paymentTotal);
-  const totalQuantity = items.reduce(
-    (sum, item) => sum + Number(item.quantity),
+
+  const grossTotal = releaseLedger.items.reduce(
+    (sum, item) => sum + item.grossValue,
     0,
   );
+  const grossRemaining = releaseLedger.items.reduce(
+    (sum, item) => sum + item.unitPrice * item.remainingQty,
+    0,
+  );
+  const remainingFraction = grossTotal > 0 ? grossRemaining / grossTotal : 0;
+  const remainingReservationDiscount =
+    Number(reservation.discount) * remainingFraction;
+  const remainingTotal = Math.max(
+    releaseLedger.remainingSubtotal - remainingReservationDiscount,
+    0,
+  );
+  const downpaymentCommitted = releaseLedger.downpaymentCommitted;
+  const remainingUnapplied = Math.max(
+    totals.amountPaid - downpaymentCommitted,
+    0,
+  );
+  const balanceDue = Math.max(remainingTotal - remainingUnapplied, 0);
+  const releaseById = new Map(
+    releaseLedger.items.map((item) => [item.id, item]),
+  );
+  const displayItems = (items ?? [])
+    .filter(
+      (item) => (releaseById.get(item.id)?.remainingQty ?? Number(item.quantity)) > 0,
+    )
+    .map((item) => {
+      const ledger = releaseById.get(item.id);
+      const remainingQty = ledger?.remainingQty ?? Number(item.quantity);
+      const releasedQty = ledger?.releasedQty ?? 0;
+      return {
+        id: item.id,
+        sku: item.sku,
+        item_name: item.item_name,
+        category: item.category,
+        ordered_at: item.ordered_at,
+        quantity: remainingQty,
+        originalQty: Number(item.quantity),
+        releasedQty,
+        unit_price: Number(item.unit_price),
+        line_total: Math.max(
+          Number(item.line_total) - (ledger?.releasedSubtotal ?? 0),
+          0,
+        ),
+      };
+    });
   const statusLabel = getInvoiceStatusLabel(reservation.status);
   const canWrite = roleCanWrite(profile?.role);
   const cancelTransition = getReservationTransitions(
@@ -98,16 +183,19 @@ export default async function ReservationInvoicePage({
   return (
     <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8" data-print-page>
       <div className="mb-5 space-y-3" data-print-hide>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Link
-            className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
-            href={"/reservations/" + reservation.id}
-          >
-            Back to reservation
-          </Link>
-          <PrintInvoiceButton />
-        </div>
+        <Link
+          className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
+          href={"/reservations/" + reservation.id}
+        >
+          Back to reservation
+        </Link>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <a
+            className="inline-flex h-9 items-center rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold hover:bg-canvas"
+            href={"/reservations/" + reservation.id + "/invoice/pdf"}
+          >
+            Download PDF
+          </a>
           <InvoiceActionBar
             balance={totals.balance}
             canWrite={canWrite && !reservation.archived_at && reservation.status !== "cancelled"}
@@ -118,19 +206,21 @@ export default async function ReservationInvoicePage({
             updatedAt={reservation.updated_at}
           />
           {cancelTransition && !reservation.archived_at && (
-            <ConfirmAction
-              action={transitionReservationStatus.bind(
-                null,
-                reservation.id,
-                "cancelled",
-                reservation.updated_at,
-              )}
-              appearance="compact-danger"
-              confirmation={cancelTransition.confirmation}
-              variant="danger"
-            >
-              CANCEL
-            </ConfirmAction>
+            <div className="[&_button]:h-11 [&_button]:rounded-lg">
+              <ConfirmAction
+                action={transitionReservationStatus.bind(
+                  null,
+                  reservation.id,
+                  "cancelled",
+                  reservation.updated_at,
+                )}
+                appearance="compact-danger"
+                confirmation={cancelTransition.confirmation}
+                variant="danger"
+              >
+                CANCEL
+              </ConfirmAction>
+            </div>
           )}
         </div>
       </div>
@@ -236,7 +326,7 @@ export default async function ReservationInvoicePage({
             </div>
             <div className="mt-4">
               <InvoiceNotes
-                canWrite={canWrite && !reservation.archived_at}
+                canWrite={false}
                 notes={reservation.notes}
                 reservationId={reservation.id}
                 updatedAt={reservation.updated_at}
@@ -246,6 +336,29 @@ export default async function ReservationInvoicePage({
         </section>
 
         <section className="px-6 pt-5 sm:px-9" data-print-inset>
+          {releaseLedger.releasedUnits > 0 && (
+            <div
+              className="mb-5 rounded-lg border border-gold bg-gold-soft px-4 py-3 text-xs sm:text-sm"
+              data-print-band
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+                Already released &amp; billed separately
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
+                <span className="text-ink">
+                  {releaseLedger.releasedUnits} unit
+                  {releaseLedger.releasedUnits === 1 ? "" : "s"} worth{" "}
+                  {formatCurrency(releaseLedger.releasedSubtotal)}
+                </span>
+                <span className="text-muted">
+                  Downpayment applied to released goods:{" "}
+                  <strong className="text-ink">
+                    {formatCurrency(downpaymentCommitted)}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          )}
           <h2 className="sr-only">Jewelry Items</h2>
           <div className="overflow-x-auto" data-print-unclip>
             <table className="w-full min-w-[640px] border-collapse text-left">
@@ -253,31 +366,52 @@ export default async function ReservationInvoicePage({
                 <tr className="border-b-2 border-gold bg-gold-soft text-[10px] uppercase tracking-[0.14em] text-gold-dark">
                   <th className="px-3 py-2.5 font-bold">No.</th>
                   <th className="px-3 py-2.5 font-bold">Item</th>
+                  <th className="px-3 py-2.5 font-bold">Order Date</th>
                   <th className="px-3 py-2.5 text-right font-bold">Quantity</th>
                   <th className="px-3 py-2.5 text-right font-bold">Unit Price</th>
                   <th className="px-3 py-2.5 text-right font-bold">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {items.map((item, index) => (
-                  <tr key={item.id}>
-                    <td className="px-3 py-2.5 align-top text-sm text-muted">
-                      {index + 1}
-                    </td>
-                    <td className="break-words px-3 py-2.5 text-sm font-semibold text-ink">
-                      {item.sku + " - " + item.item_name + " - " + item.category}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
-                      {item.quantity}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
-                      {formatCurrency(Number(item.unit_price))}
-                    </td>
-                    <td className="px-3 py-2.5 text-right align-top text-sm font-bold tabular-nums">
-                      {formatCurrency(Number(item.line_total))}
+                {displayItems.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-3 py-6 text-center text-sm text-muted"
+                    >
+                      All reserved items have been released.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  displayItems.map((item, index) => (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2.5 align-top text-sm text-muted">
+                        {index + 1}
+                      </td>
+                      <td className="break-words px-3 py-2.5 text-sm font-semibold text-ink">
+                        {item.sku + " - " + item.item_name + " - " + item.category}
+                        {item.releasedQty > 0 && (
+                          <p className="mt-0.5 text-xs font-normal text-muted">
+                            {item.releasedQty} of {item.originalQty}{" "}
+                            released; {item.quantity} remaining
+                          </p>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 align-top text-sm text-muted">
+                        {formatOrderDateTime(item.ordered_at)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
+                        {item.quantity}
+                      </td>
+                      <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
+                        {formatCurrency(item.unit_price)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right align-top text-sm font-bold tabular-nums">
+                        {formatCurrency(item.line_total)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -288,17 +422,32 @@ export default async function ReservationInvoicePage({
           data-print-inset
           data-print-totals
         >
-          <InvoiceTotal label="Subtotal" value={totals.subtotal} />
+          <InvoiceTotal
+            label={
+              releaseLedger.releasedUnits > 0
+                ? "Subtotal (remaining items)"
+                : "Subtotal"
+            }
+            value={releaseLedger.remainingSubtotal}
+          />
           <InvoiceTotal
             label="Reservation Discount"
-            value={totals.reservationDiscount}
+            value={remainingReservationDiscount}
           />
           <div className="flex justify-between gap-6 py-1.5 text-sm text-muted">
             <span>Total Quantity</span>
-            <span className="whitespace-nowrap tabular-nums">{totalQuantity}</span>
+            <span className="whitespace-nowrap tabular-nums">
+              {releaseLedger.remainingUnits}
+            </span>
           </div>
-          <InvoiceTotal emphasize label="Total" value={totals.total} />
+          <InvoiceTotal emphasize label="Total" value={remainingTotal} />
           <InvoiceTotal label="Amount Paid" value={totals.amountPaid} />
+          {downpaymentCommitted > 0 && (
+            <InvoiceTotal
+              label="Applied to released goods"
+              value={-downpaymentCommitted}
+            />
+          )}
           <div
             className="mt-3 flex items-center justify-between gap-4 border-2 border-gold bg-gold-soft px-4 py-3"
             data-print-band
@@ -307,7 +456,7 @@ export default async function ReservationInvoicePage({
               Balance Due
             </span>
             <span className="whitespace-nowrap font-serif text-xl font-bold tabular-nums text-ink">
-              {formatCurrency(totals.balance)}
+              {formatCurrency(balanceDue)}
             </span>
           </div>
         </section>

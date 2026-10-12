@@ -8,6 +8,7 @@ import {
   updateReservationInvoiceNotes,
 } from "@/actions/reservations";
 import { recordReservationPayments } from "@/actions/payments";
+import { PrintInvoiceButton } from "@/components/reservations/print-invoice-button";
 import { formatCurrency } from "@/lib/format";
 
 type InvoiceControlsProps = {
@@ -76,11 +77,13 @@ export function InvoiceActionBar({
       message:
         code === "overpayment"
           ? "Payment cannot exceed the balance due."
-          : code === "pricing-incomplete"
-            ? "Complete item pricing before recording a payment."
-            : code === "stale-reservation"
-              ? "This reservation changed. Refresh the page and try again."
-              : "Unable to record payment. Please review the payment details and try again.",
+          : code === "deduction-exceeds-paid"
+            ? "A deduction cannot exceed the total already paid."
+            : code === "pricing-incomplete"
+              ? "Complete item pricing before recording a payment."
+              : code === "stale-reservation"
+                ? "This reservation changed. Refresh the page and try again."
+                : "Unable to record payment. Please review the payment details and try again.",
     });
   }
 
@@ -120,6 +123,7 @@ export function InvoiceActionBar({
             </button>
           </>
         )}
+        <PrintInvoiceButton />
       </div>
       {feedback && (
         <p
@@ -168,7 +172,6 @@ export function InvoiceActionBar({
                   autoFocus
                   className="mt-1.5 h-11 w-full rounded-lg border border-border px-3 tabular-nums outline-none focus:border-gold"
                   max={balance.toFixed(2)}
-                  min="0.01"
                   name={"amount:" + reservationId}
                   required
                   step="0.01"

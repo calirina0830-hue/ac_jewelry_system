@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       id: item.id,
       sku: item.sku,
       name: item.name,
+      category: item.category,
       imagePath: item.image_path,
     })),
   });

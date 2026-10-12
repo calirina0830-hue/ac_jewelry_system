@@ -154,6 +154,8 @@ export default async function ReservationsPage({
 
   if (filters.status === "delivered") {
     query = query.not("delivered_at", "is", null);
+  } else if (filters.status === "reserved") {
+    query = query.eq("status", "reserved").is("delivered_at", null);
   } else if (filters.status !== "all") {
     query = query.eq("status", filters.status);
   }

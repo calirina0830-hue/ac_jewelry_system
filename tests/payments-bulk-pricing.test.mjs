@@ -7,6 +7,7 @@ import {
   MAX_PAYMENT_EVIDENCE_BYTES,
 } from "../lib/constants/payments.ts";
 import { getInvoiceTotals } from "../lib/reservations/invoice.ts";
+import { centsToDecimal } from "../lib/reservations/money.ts";
 import {
   canRecordReservationPayment,
   needsReservationPricing,
@@ -47,13 +48,17 @@ const finalPaymentMigrationUrl = new URL(
   "../supabase/migrations/202608190002_finalize_reservation_on_payment.sql",
   import.meta.url,
 );
+const deductionMigrationUrl = new URL(
+  "../supabase/migrations/202610130001_payment_deductions.sql",
+  import.meta.url,
+);
 
 function fakeFile(bytes, type) {
   const body = Uint8Array.from(bytes).buffer;
   return { size: body.byteLength, type, arrayBuffer: async () => body };
 }
 
-test("manual reservation payment validation requires a positive server-normalized amount", () => {
+test("manual reservation payment validation normalizes signed amounts and rejects zero", () => {
   const valid = paymentEntrySchema.parse({
     reservationId: "11111111-1111-4111-8111-111111111111",
     expectedUpdatedAt: "2026-08-18T01:00:00+00:00",
@@ -64,7 +69,48 @@ test("manual reservation payment validation requires a positive server-normalize
   });
   assert.equal(valid.amount, 129950);
   assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "0" }).success, false);
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "abc" }).success, false);
+  const deduction = paymentEntrySchema.parse({ ...valid, amount: "-500.00" });
+  assert.equal(deduction.amount, -50000);
+  assert.equal(centsToDecimal(deduction.amount), "-500.00");
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "-0.01" }).success, true);
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "-7.50" }).success, true);
+  assert.equal(centsToDecimal(paymentEntrySchema.parse({ ...valid, amount: "-7.50" }).amount), "-7.50");
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "--5" }).success, false);
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "5.999" }).success, false);
+  assert.equal(paymentEntrySchema.safeParse({ ...valid, amount: "" }).success, false);
+  assert.equal(centsToDecimal(valid.amount), "1299.50");
   assert.equal(revertReasonSchema.safeParse(" ").success, false);
+});
+
+test("negative payment recalculates total paid and remaining balance", () => {
+  const reservation = {
+    subtotal: 2398,
+    discount: 0,
+    total: 2398,
+    downpayment: 1000,
+    balance: 1398,
+  };
+  const previousPaid = 1000;
+  const paymentCents = paymentEntrySchema.parse({
+    reservationId: "11111111-1111-4111-8111-111111111111",
+    expectedUpdatedAt: "2026-08-18T01:00:00+00:00",
+    amount: "-500",
+    paymentMethod: "",
+    referenceNo: "",
+    notes: "",
+  }).amount;
+  assert.equal(paymentCents, -50000);
+
+  const paymentAmount = Number(centsToDecimal(paymentCents));
+  assert.equal(paymentAmount, -500);
+
+  const totalPaid = previousPaid + paymentAmount;
+  assert.equal(totalPaid, 500);
+
+  const totals = getInvoiceTotals(reservation, totalPaid);
+  assert.equal(totals.amountPaid, 500);
+  assert.equal(totals.balance, 1898);
 });
 
 test("payment evidence validates MIME plus image signature and safe authenticated paths", async () => {
@@ -244,6 +290,24 @@ test("first and later partial payments append to the ledger and keep Reserved", 
   assert.doesNotMatch(rpc, /update public\.reservation_payments/i);
 });
 
+test("payment deductions append to the ledger without driving paid below zero", async () => {
+  const migration = await readFile(deductionMigrationUrl, "utf8");
+  const rpc = migration.match(
+    /create or replace function public\.record_reservation_payment\([\s\S]*?\$function\$;/i,
+  )?.[0];
+  assert.ok(rpc);
+  assert.match(rpc, /abs\(p_amount\) > 9999999999\.99/i);
+  assert.match(rpc, /p_amount = 0/i);
+  assert.doesNotMatch(rpc, /p_amount <= 0/i);
+  assert.match(rpc, /if p_amount > 0 then[\s\S]*?reservation_already_settled/i);
+  assert.match(rpc, /if p_amount > v_balance then[\s\S]*?payment_exceeds_balance/i);
+  assert.match(rpc, /v_existing_paid \+ p_amount < 0[\s\S]*?deduction_exceeds_paid/i);
+  assert.match(rpc, /downpayment = greatest\(least\(total, v_total_paid\), 0\)/i);
+  assert.match(rpc, /insert into public\.reservation_payments/i);
+  assert.match(migration, /drop constraint if exists reservation_payments_amount_positive/i);
+  assert.match(migration, /add constraint reservation_payments_amount_nonzero[\s\S]*?check \(amount <> 0\)/i);
+});
+
 test("the final payment atomically reaches Paid and the Mark Paid shortcut is dropped", async () => {
   const migration = await readFile(finalPaymentMigrationUrl, "utf8");
   const rpc = migration.match(
@@ -306,7 +370,7 @@ test("Admin Paid to Reserved voids rather than deletes payments and keeps an aud
 });
 
 test("bulk payment review records partial payments and cleans every failed upload", async () => {
-  const [page, action, uploadForm, list] = await Promise.all([
+  const [page, action, uploadForm, list, card] = await Promise.all([
     readFile(new URL("../app/(dashboard)/reservations/bulk/pay/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../actions/payments.ts", import.meta.url), "utf8"),
     readFile(
@@ -314,11 +378,18 @@ test("bulk payment review records partial payments and cleans every failed uploa
       "utf8",
     ),
     readFile(new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../components/reservations/record-payment-card.tsx", import.meta.url),
+      "utf8",
+    ),
   ]);
-  assert.match(page, /Payment amount/);
-  assert.match(page, /Payment method/);
-  assert.match(page, /PaymentEvidenceInput/);
+  assert.match(page, /RecordPaymentCard/);
   assert.match(page, /PaymentUploadForm/);
+  assert.match(card, /Payment amount/);
+  assert.match(card, /Payment method/);
+  assert.match(card, /PaymentEvidenceInput/);
+  assert.match(card, /Current total paid/);
+  assert.match(card, /Current remaining balance/);
   assert.match(action, /bulk_record_reservation_payments/);
   assert.doesNotMatch(action, /\.upload\(/);
   assert.match(action, /formData\.values\(\)[\s\S]*?instanceof File/);
@@ -344,6 +415,52 @@ test("bulk payment review records partial payments and cleans every failed uploa
   assert.match(list, /BulkSelectAll/);
   assert.match(list, /BulkReviewButton destination="pay"/);
   assert.match(list, /BulkSubmitButton[\s\S]*?operation="deliver"/);
+});
+
+test("payment amount recomputes paid and remaining totals in real time", async () => {
+  const card = await readFile(
+    new URL("../components/reservations/record-payment-card.tsx", import.meta.url),
+    "utf8",
+  );
+
+  for (const fragment of [
+    "useState",
+    "onChange",
+    "name={\"amount:\" + reservation.id}",
+    "totalPaid",
+    "remaining",
+    "setAmount",
+  ]) {
+    assert.match(card, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(
+    card,
+    /const payment = Number\.isFinite\(parsed\) \? parsed : 0;/,
+  );
+  assert.doesNotMatch(card, /parsed > 0 \? parsed : 0/);
+  assert.doesNotMatch(card, /min="0\.01"/);
+});
+
+test("both payment inputs allow deductions and explain a rejected deduction", async () => {
+  const [card, invoiceControls, page] = await Promise.all([
+    readFile(
+      new URL("../components/reservations/record-payment-card.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../components/reservations/invoice-controls.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/(dashboard)/reservations/bulk/pay/page.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.doesNotMatch(card, /min="0\.01"/);
+  assert.doesNotMatch(invoiceControls, /min="0\.01"/);
+  assert.match(invoiceControls, /deduction-exceeds-paid/);
+  assert.match(page, /deduction-exceeds-paid/);
 });
 
 test("individual and bulk payment eligibility keeps partial reservations payable", async () => {
@@ -472,7 +589,7 @@ test("payment flow resets after cancel, navigation, and reservation changes", as
   ]);
 
   assert.match(page, /PaymentFormActions/);
-  assert.match(page, /PaymentEvidenceInput key=\{reservation\.id\}/);
+  assert.match(page, /RecordPaymentCard/);
   assert.match(controls, /usePaymentSubmissionPhase/);
   assert.match(controls, /form\?\.reset\(\)/);
   assert.match(controls, /disabled=\{pricingIncomplete \|\| pending\}/);

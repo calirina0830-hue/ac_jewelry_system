@@ -24,9 +24,11 @@ export function parseMoneyToCents(value: string | number): number | null {
 }
 
 export function centsToDecimal(cents: number): string {
-  const whole = Math.floor(cents / 100);
-  const fraction = String(cents % 100).padStart(2, "0");
-  return whole + "." + fraction;
+  const sign = cents < 0 ? "-" : "";
+  const absolute = Math.abs(cents);
+  const whole = Math.floor(absolute / 100);
+  const fraction = String(absolute % 100).padStart(2, "0");
+  return sign + whole + "." + fraction;
 }
 
 export function calculateReservationTotals(

@@ -12,6 +12,9 @@ export const STOCK_CATEGORIES = [
 
 export type StockCategory = (typeof STOCK_CATEGORIES)[number];
 
+export const STOCK_CATEGORY_OTHER = "Others";
+export const STOCK_CATEGORY_MAX_LENGTH = 40;
+
 export const LOW_STOCK_THRESHOLD = 5;
 export const STOCK_IMAGE_BUCKET = "stock-images";
 export const MAX_STOCK_IMAGE_BYTES = 5 * 1024 * 1024;

@@ -185,18 +185,22 @@ begin
       v_month := substr(v_date_text, 6, 2)::int;
       v_day := substr(v_date_text, 9, 2)::int;
 
-      if v_year < 1
-         or v_month not between 1 and 12
-         or v_day < 1
-         or v_day > case
-           when v_month in (1, 3, 5, 7, 8, 10, 12) then 31
-           when v_month in (4, 6, 9, 11) then 30
-           else case
-             when (v_year % 4 = 0 and v_year % 100 <> 0) or v_year % 400 = 0
-               then 29
-             else 28
-           end
-         end then
+if v_year < 1
+          or v_month not between 1 and 12
+          or v_day < 1
+          or v_day > (
+            case v_month
+              when 2 then case
+                when (v_year % 4 = 0 and v_year % 100 <> 0) or v_year % 400 = 0 then 29
+                else 28
+              end
+              when 4 then 30
+              when 6 then 30
+              when 9 then 30
+              when 11 then 30
+              else 31
+            end
+          ) then
         raise exception 'invalid_import_date' using errcode = 'P0001';
       end if;
 

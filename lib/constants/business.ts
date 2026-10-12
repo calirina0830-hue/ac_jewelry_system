@@ -1,5 +1,5 @@
 export const BUSINESS = {
-  name: "AC Pearl and Jewelries",
+  name: "AC Pearls and Jewels",
   shortName: "AC",
   descriptor: "Pearl & Jewelries",
   systemLabel: "Reservation Management",

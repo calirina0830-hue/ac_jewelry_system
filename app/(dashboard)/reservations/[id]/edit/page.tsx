@@ -74,6 +74,7 @@ export default async function EditReservationPage({
       priceConfirmed: item.price_confirmed,
       itemName: item.item_name,
       sku: item.sku,
+      category: item.category ?? "",
       imagePath: item.image_path,
     })),
   };

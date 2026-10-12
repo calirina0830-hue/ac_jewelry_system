@@ -9,6 +9,7 @@ export type ReservationStockOption = {
   id: string;
   sku: string;
   name: string;
+  category: string;
   imagePath: string | null;
 };
 
@@ -21,6 +22,7 @@ export type ReservationInitialItem = {
   priceConfirmed?: boolean;
   itemName: string;
   sku: string;
+  category: string;
   imagePath: string | null;
 };
 

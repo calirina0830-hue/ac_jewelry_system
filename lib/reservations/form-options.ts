@@ -78,6 +78,7 @@ export async function getReservationFormOptions({
         id: item.id,
         sku: item.sku,
         name: item.name,
+        category: item.category,
         imagePath: item.image_path,
       })),
     );

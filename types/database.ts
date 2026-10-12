@@ -122,6 +122,7 @@ export type Database = {
           line_total: number;
           image_path: string | null;
           price_confirmed: boolean;
+          ordered_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -138,6 +139,7 @@ export type Database = {
           line_total: MoneyInput;
           image_path?: string | null;
           price_confirmed?: boolean;
+          ordered_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -152,6 +154,7 @@ export type Database = {
           line_total?: MoneyInput;
           image_path?: string | null;
           price_confirmed?: boolean;
+          ordered_at?: string | null;
         };
         Relationships: [
           {
@@ -390,6 +393,95 @@ export type Database = {
             columns: ["reservation_id"];
             isOneToOne: false;
             referencedRelation: "reservations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      reservation_shipments: {
+        Row: {
+          id: string;
+          shipment_no: string;
+          reservation_id: string;
+          status: "pending" | "shipped" | "cancelled";
+          notes: string | null;
+          cancel_reason: string | null;
+          downpayment_applied: number;
+          shipped_at: string | null;
+          cancelled_at: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipment_no?: string;
+          reservation_id: string;
+          status?: "pending" | "shipped" | "cancelled";
+          notes?: string | null;
+          cancel_reason?: string | null;
+          downpayment_applied?: MoneyInput;
+          shipped_at?: string | null;
+          cancelled_at?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          notes?: string | null;
+          cancel_reason?: string | null;
+          downpayment_applied?: MoneyInput;
+          shipped_at?: string | null;
+          cancelled_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "reservation_shipments_reservation_id_fkey";
+            columns: ["reservation_id"];
+            isOneToOne: false;
+            referencedRelation: "reservations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      reservation_shipment_items: {
+        Row: {
+          id: string;
+          shipment_id: string;
+          reservation_item_id: string;
+          quantity: number;
+          downpayment_allocated: number;
+          ordered_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipment_id: string;
+          reservation_item_id: string;
+          quantity: number;
+          downpayment_allocated?: MoneyInput;
+          ordered_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          quantity?: number;
+          downpayment_allocated?: MoneyInput;
+          ordered_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "reservation_shipment_items_shipment_id_fkey";
+            columns: ["shipment_id"];
+            isOneToOne: false;
+            referencedRelation: "reservation_shipments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reservation_shipment_items_reservation_item_id_fkey";
+            columns: ["reservation_item_id"];
+            isOneToOne: false;
+            referencedRelation: "reservation_items";
             referencedColumns: ["id"];
           },
         ];
@@ -633,6 +725,7 @@ export type Database = {
           id: string;
           sku: string;
           name: string;
+          category: string;
           price: number;
           quantity: number;
           available_quantity: number;
@@ -672,6 +765,51 @@ export type Database = {
           fullySettled: boolean;
           status: ReservationStatus;
         };
+      };
+      cancel_reservation_shipment: {
+        Args: { p_shipment_id: string; p_reason?: string | null };
+        Returns: {
+          shipmentId: string;
+          shipmentNo: string;
+          status: string;
+          cancelledAt: string;
+        };
+      };
+      confirm_reservation_shipment: {
+        Args: { p_shipment_id: string };
+        Returns: {
+          shipmentId: string;
+          shipmentNo: string;
+          status: string;
+          shippedAt: string;
+        };
+      };
+      prepare_reservation_shipment: {
+        Args: {
+          p_reservation_id: string;
+          p_items: unknown;
+          p_downpayment_applied?: MoneyInput;
+        };
+        Returns: {
+          shipmentId: string;
+          shipmentNo: string;
+          status: string;
+          itemCount: number;
+          totalQuantity: number;
+          downpaymentApplied: MoneyInput;
+        };
+      };
+      reservation_downpayment_committed: {
+        Args: { p_reservation_id: string };
+        Returns: number;
+      };
+      reservation_item_committed_quantity: {
+        Args: { p_reservation_item_id: string };
+        Returns: number;
+      };
+      set_reservation_item_ordered_at: {
+        Args: { p_reservation_item_id: string; p_ordered_at: string };
+        Returns: string;
       };
       transition_reservation_status: {
         Args: {

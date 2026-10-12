@@ -14,6 +14,8 @@ import {
 import {
   MAX_STOCK_IMAGE_BYTES,
   STOCK_CATEGORIES,
+  STOCK_CATEGORY_MAX_LENGTH,
+  STOCK_CATEGORY_OTHER,
   STOCK_IMAGE_MIME_TYPES,
 } from "@/lib/constants/stock";
 import type { Database } from "@/types/database";
@@ -33,6 +35,15 @@ export function StockForm({
   const [previewUrl, setPreviewUrl] = useState(imageUrl ?? null);
   const [removeImage, setRemoveImage] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const categoryIsCustom =
+    item != null &&
+    !(STOCK_CATEGORIES as readonly string[]).includes(item.category);
+  const [categoryChoice, setCategoryChoice] = useState<string>(
+    categoryIsCustom ? STOCK_CATEGORY_OTHER : (item?.category ?? STOCK_CATEGORIES[0]),
+  );
+  const [customCategory, setCustomCategory] = useState<string>(
+    categoryIsCustom && item ? item.category : "",
+  );
 
   useEffect(() => {
     return () => {
@@ -152,11 +163,12 @@ export function StockForm({
             required
           />
           <SelectField
-            defaultValue={item?.category ?? STOCK_CATEGORIES[0]}
             errors={state.fieldErrors?.category}
             label="Category"
-            name="category"
+            name="categoryChoice"
+            onChange={(event) => setCategoryChoice(event.target.value)}
             required
+            value={categoryChoice}
           >
             {STOCK_CATEGORIES.map((category) => (
               <option key={category} value={category}>
@@ -164,6 +176,20 @@ export function StockForm({
               </option>
             ))}
           </SelectField>
+          {categoryChoice === STOCK_CATEGORY_OTHER ? (
+            <InputField
+              errors={state.fieldErrors?.category}
+              label="Other category"
+              maxLength={STOCK_CATEGORY_MAX_LENGTH}
+              name="category"
+              onChange={(event) => setCustomCategory(event.target.value)}
+              placeholder="e.g. Brooch, Cufflinks, Charm"
+              required
+              value={customCategory}
+            />
+          ) : (
+            <input name="category" type="hidden" value={categoryChoice} />
+          )}
           <div className="sm:col-span-2">
             <TextareaField
               defaultValue={item?.description ?? ""}

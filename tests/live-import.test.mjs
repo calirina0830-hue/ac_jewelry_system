@@ -608,3 +608,22 @@ test("ambiguous item codes remain rejected", () => {
   assert.equal(result.rows[0].result, "Item Ambiguous");
 });
 
+test("existing active reserved records merge by customer without losing linked records", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202610160002_merge_existing_reserved_reservations.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /reservation\.status = 'reserved'/);
+  assert.match(migration, /reservation\.archived_at is null/);
+  assert.match(migration, /group by reservation\.customer_id\s+having count\(\*\) > 1/);
+  assert.match(migration, /update public\.reservation_payments\s+set reservation_id = v_reservation_id/);
+  assert.match(migration, /update public\.reservation_shipments\s+set reservation_id = v_reservation_id/);
+  assert.match(migration, /update public\.reservation_status_history\s+set reservation_id = v_reservation_id/);
+  assert.match(migration, /subtotal = v_combined_subtotal/);
+  assert.match(migration, /balance = v_combined_balance/);
+  assert.match(migration, /delete from public\.reservations\s+where id = v_duplicate\.id/);
+});

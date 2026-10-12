@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { STOCK_CATEGORIES } from "@/lib/constants/stock";
+import { STOCK_CATEGORY_MAX_LENGTH } from "@/lib/constants/stock";
 
 export const stockFormSchema = z.object({
   id: z.string().uuid("Invalid stock item identifier.").optional(),
@@ -24,9 +24,14 @@ export const stockFormSchema = z.object({
     .trim()
     .max(4000, "Description is too long.")
     .transform((value) => value || null),
-  category: z.enum(STOCK_CATEGORIES, {
-    error: "Select a valid jewelry category.",
-  }),
+  category: z
+    .string()
+    .trim()
+    .min(1, "Select a category.")
+    .max(STOCK_CATEGORY_MAX_LENGTH, "Category is too long.")
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), {
+      error: "Category contains invalid characters.",
+    }),
   quantity: z.coerce
     .number()
     .int("Quantity must be a whole number.")
@@ -39,7 +44,7 @@ export const stockIdSchema = z.string().uuid();
 
 export const stockQuerySchema = z.object({
   q: z.string().trim().max(100).catch(""),
-  category: z.enum(["all", ...STOCK_CATEGORIES]).catch("all"),
+  category: z.string().trim().min(1).max(STOCK_CATEGORY_MAX_LENGTH).catch("all"),
   status: z.enum(["active", "inactive", "archived", "all"]).catch("active"),
   sort: z
     .enum(["sku", "name", "category", "created_at"])

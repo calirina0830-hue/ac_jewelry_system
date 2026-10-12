@@ -89,6 +89,8 @@ test("money parsing and formatting use integer cents", () => {
   assert.equal(parseMoneyToCents("0.10"), 10);
   assert.equal(parseMoneyToCents("123456.78"), 12_345_678);
   assert.equal(centsToDecimal(12_345_678), "123456.78");
+  assert.equal(centsToDecimal(-500_00), "-500.00");
+  assert.equal(centsToDecimal(-750), "-7.50");
   assert.equal(parseMoneyToCents("1.999"), null);
 });
 
