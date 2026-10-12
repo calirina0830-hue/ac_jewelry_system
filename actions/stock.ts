@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { logActivity } from "@/lib/activity";
-import { authorizeRoles } from "@/lib/auth";
+import { authorizeRoles, roleIsAdmin } from "@/lib/auth";
 import { STOCK_IMAGE_BUCKET } from "@/lib/constants/stock";
 import { resolveStockQuantity } from "@/lib/stock/quantity";
 import { createClient } from "@/lib/supabase/server";
@@ -14,7 +14,7 @@ import { getFieldErrors } from "@/lib/validation/form-errors";
 import { stockFormSchema, stockIdSchema } from "@/lib/validation/stock";
 import type { FormActionState } from "@/types/forms";
 
-const WRITE_ROLES = ["admin", "staff"] as const;
+const WRITE_ROLES = ["admin", "staff", "owner", "developer"] as const;
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 function unauthorizedState(): FormActionState {
@@ -199,7 +199,7 @@ export async function updateStockItem(
     return { status: "error", message: "Stock item not found." };
   }
 
-  if (existing.archived_at && authorization.profile.role !== "admin") {
+  if (existing.archived_at && !roleIsAdmin(authorization.profile.role)) {
     return {
       status: "error",
       message: "Archived stock can only be changed by an administrator.",

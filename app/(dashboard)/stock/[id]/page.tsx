@@ -8,7 +8,7 @@ import { StockStatus } from "@/components/stock/stock-status";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageNotice } from "@/components/ui/page-notice";
-import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { getStockImageUrl } from "@/lib/storage/stock-images";
@@ -33,7 +33,7 @@ export default async function StockItemDetailsPage({
 
   const profile = await getCurrentProfile();
   const canWrite = roleCanWrite(profile?.role);
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = roleIsAdmin(profile?.role);
   const supabase = await createClient();
   const { data: item } = await supabase
     .from("stock_items")

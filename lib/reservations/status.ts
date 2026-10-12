@@ -28,7 +28,8 @@ export function canRoleTransitionReservation(
   from: ReservationStatus,
   to: ReservationStatus,
 ): boolean {
-  if (role !== "admin" && role !== "staff") {
+  const isAdmin = role === "admin" || role === "developer" || role === "owner";
+  if (!isAdmin && role !== "staff") {
     return false;
   }
 
@@ -37,10 +38,10 @@ export function canRoleTransitionReservation(
   }
 
   if (from === "paid" && to === "reserved") {
-    return role === "admin";
+    return isAdmin;
   }
 
-  return to !== "cancelled" || role === "admin";
+  return to !== "cancelled" || isAdmin;
 }
 
 export function getReservationTransitions(

@@ -10,7 +10,7 @@ import {
 import { PrintInvoiceButton } from "@/components/reservations/print-invoice-button";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { logActivity } from "@/lib/activity";
-import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
 import { formatCurrency, formatDate } from "@/lib/format";
 import {
@@ -84,7 +84,7 @@ export default async function ReservationInvoicePage({
     0,
   );
   const statusLabel = getInvoiceStatusLabel(reservation.status);
-  const canWrite = profile?.role === "admin" || profile?.role === "staff";
+  const canWrite = roleCanWrite(profile?.role);
   const cancelTransition = getReservationTransitions(
     profile?.role,
     reservation.status,

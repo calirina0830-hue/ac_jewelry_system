@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PageNotice } from "@/components/ui/page-notice";
 import { Pagination } from "@/components/ui/pagination";
 import { SortLink } from "@/components/ui/sort-link";
-import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { sanitizeSearchTerm } from "@/lib/query";
@@ -40,7 +40,7 @@ export default async function CustomersPage({
   const search = sanitizeSearchTerm(filters.q);
   const profile = await getCurrentProfile();
   const canWrite = roleCanWrite(profile?.role);
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = roleIsAdmin(profile?.role);
   const supabase = await createClient();
   const from = (filters.page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;

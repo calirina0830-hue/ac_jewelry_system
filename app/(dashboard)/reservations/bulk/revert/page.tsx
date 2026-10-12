@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { bulkRevertPaidReservations } from "@/actions/reservations";
 import { PageHeader } from "@/components/ui/page-header";
-import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentProfile, roleIsAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { paymentBatchIdsSchema } from "@/lib/validation/payments";
 
@@ -16,7 +16,7 @@ export default async function RevertPaidReservationsPage({
   searchParams: Promise<{ ids?: string }>;
 }) {
   const profile = await getCurrentProfile();
-  if (profile?.role !== "admin") {
+  if (!roleIsAdmin(profile?.role)) {
     redirect("/reservations?status=paid&error=not-authorized");
   }
   const query = await searchParams;

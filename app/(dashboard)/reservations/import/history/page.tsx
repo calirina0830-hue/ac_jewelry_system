@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentProfile, roleIsAdmin } from "@/lib/auth";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Live Import History" };
 
 export default async function LiveImportHistoryPage() {
   const profile = await getCurrentProfile();
-  if (profile?.role !== "admin") {
+  if (!roleIsAdmin(profile?.role)) {
     redirect("/reservations?error=Only administrators can inspect import history.");
   }
 

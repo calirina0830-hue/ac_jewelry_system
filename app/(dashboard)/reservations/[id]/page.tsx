@@ -13,7 +13,7 @@ import { StockImage } from "@/components/stock/stock-image";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageNotice } from "@/components/ui/page-notice";
-import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import {
   canRecordReservationPayment,
@@ -44,7 +44,7 @@ export default async function ReservationDetailsPage({
 
   const profile = await getCurrentProfile();
   const canWrite = roleCanWrite(profile?.role);
-  const isAdmin = profile?.role === "admin";
+  const isAdmin = roleIsAdmin(profile?.role);
   const supabase = await createClient();
   const { data: reservation } = await supabase
     .from("reservations")

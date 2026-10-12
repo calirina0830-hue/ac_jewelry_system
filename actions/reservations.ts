@@ -20,7 +20,7 @@ import {
 import type { ReservationStatus } from "@/types/database";
 import type { FormActionState } from "@/types/forms";
 
-const WRITE_ROLES = ["admin", "staff"] as const;
+const WRITE_ROLES = ["admin", "staff", "owner", "developer"] as const;
 
 function getTextField(formData: FormData, name: string): string | undefined {
   const value = formData.get(name);

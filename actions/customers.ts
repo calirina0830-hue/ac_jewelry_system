@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { logActivity } from "@/lib/activity";
-import { authorizeRoles } from "@/lib/auth";
+import { authorizeRoles, roleIsAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   createCustomerSchema,
@@ -14,7 +14,7 @@ import {
 import { getFieldErrors } from "@/lib/validation/form-errors";
 import type { FormActionState } from "@/types/forms";
 
-const WRITE_ROLES = ["admin", "staff"] as const;
+const WRITE_ROLES = ["admin", "staff", "owner", "developer"] as const;
 
 function getTextField(formData: FormData, name: string): string | undefined {
   const value = formData.get(name);
@@ -136,7 +136,7 @@ export async function updateCustomer(
     return { status: "error", message: "Customer not found." };
   }
 
-  if (existing.archived_at && authorization.profile.role !== "admin") {
+  if (existing.archived_at && !roleIsAdmin(authorization.profile.role)) {
     return {
       status: "error",
       message: "Archived customers can only be changed by an administrator.",

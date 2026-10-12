@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { StockForm } from "@/components/stock/stock-form";
 import { PageHeader } from "@/components/ui/page-header";
-import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getStockImageUrl } from "@/lib/storage/stock-images";
 import { stockIdSchema } from "@/lib/validation/stock";
@@ -39,7 +39,7 @@ export default async function EditStockItemPage({
     notFound();
   }
 
-  if (item.archived_at && profile?.role !== "admin") {
+  if (item.archived_at && !roleIsAdmin(profile?.role)) {
     redirect("/stock/" + id + "?error=not-authorized");
   }
 

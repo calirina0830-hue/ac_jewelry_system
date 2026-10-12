@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { ReservationStatus } from "@/components/reservations/reservation-status";
-import { getCurrentProfile, requireUser } from "@/lib/auth";
+import { getCurrentProfile, requireUser, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
@@ -130,7 +130,7 @@ export default async function DashboardPage() {
         <MetricCard accent={paymentMetrics.payments_awaiting_evidence > 0} detail="Non-voided payments without an evidence attachment" href="/reservations?status=all" label="Payments awaiting evidence" mark="E" value={paymentMetrics.payments_awaiting_evidence} />
       </section>
 
-      {(profile?.role === "admin" || profile?.role === "staff") && (
+      {roleCanWrite(profile?.role) && (
         <section className="mt-8">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-gold-dark">
             Live Selling imports
@@ -138,7 +138,7 @@ export default async function DashboardPage() {
           <h2 className="mt-1 font-serif text-3xl text-ink">Import activity</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard detail="Confirmed today" href="/reservations?status=reserved" label="Imported reservations" mark="R" value={importMetrics.imported_reservations_today} />
-            <MetricCard detail="Reservation item rows confirmed today" href={profile.role === "admin" ? "/reservations/import/history" : "/reservations/import"} label="Imported items" mark="I" value={importMetrics.imported_items_today} />
+            <MetricCard detail="Reservation item rows confirmed today" href={roleIsAdmin(profile?.role) ? "/reservations/import/history" : "/reservations/import"} label="Imported items" mark="I" value={importMetrics.imported_items_today} />
             <MetricCard detail="Reserved value imported today" href="/reservations?status=reserved" label="Imported reserved value" mark="V" value={formatCurrency(Number(importMetrics.imported_reserved_value))} />
             <MetricCard detail="Created across confirmed imports" href="/customers" label="New import customers" mark="C" value={importMetrics.new_customers_from_imports} />
           </div>

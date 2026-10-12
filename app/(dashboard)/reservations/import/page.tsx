@@ -4,13 +4,13 @@ import { redirect } from "next/navigation";
 
 import { LiveOrderImport } from "@/components/reservations/live-order-import";
 import { PageHeader } from "@/components/ui/page-header";
-import { getCurrentProfile } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Import Live Orders" };
 
 export default async function ImportLiveOrdersPage() {
   const profile = await getCurrentProfile();
-  if (!profile || !["admin", "staff"].includes(profile.role)) {
+  if (!profile || !roleCanWrite(profile.role)) {
     redirect("/reservations?error=You are not allowed to import live orders.");
   }
 
@@ -24,7 +24,7 @@ export default async function ImportLiveOrdersPage() {
         <Link className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold" href="/reservations">
           Back to Reservations
         </Link>
-        {profile.role === "admin" && (
+        {roleIsAdmin(profile.role) && (
           <Link className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold" href="/reservations/import/history">
             Import History
           </Link>

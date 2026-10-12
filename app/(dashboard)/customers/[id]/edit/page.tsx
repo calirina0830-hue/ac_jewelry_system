@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { CustomerForm } from "@/components/customers/customer-form";
 import { PageHeader } from "@/components/ui/page-header";
-import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
+import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { customerIdSchema } from "@/lib/validation/customers";
 
@@ -38,7 +38,7 @@ export default async function EditCustomerPage({
     notFound();
   }
 
-  if (customer.archived_at && profile?.role !== "admin") {
+  if (customer.archived_at && !roleIsAdmin(profile?.role)) {
     redirect("/customers/" + id + "?error=not-authorized");
   }
 

@@ -109,3 +109,7 @@ export function roleCanWrite(role: ProfileRole | undefined): boolean {
     role === "staff"
   );
 }
+
+export function roleIsAdmin(role: ProfileRole | undefined): boolean {
+  return role === "admin" || role === "developer" || role === "owner";
+}
