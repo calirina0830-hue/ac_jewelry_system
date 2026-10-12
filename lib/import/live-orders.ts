@@ -57,6 +57,7 @@ export type ImportStockCandidate = {
 export type LiveImportResult =
   | "Ready"
   | "New Customer"
+  | "New Item"
   | "Invalid Price"
   | "Invalid Downpayment"
   | "Invalid Quantity"
@@ -69,6 +70,7 @@ export type LiveImportPreviewRow = LiveImportRow & {
   customerMatch: "Matched" | "New Customer" | "Invalid Customer";
   itemMatch:
     | "Matched"
+    | "New Item"
     | "Item Not Found"
     | "Item Ambiguous";
   result: LiveImportResult;
@@ -504,8 +506,9 @@ export function buildLiveOrderPreview({
     // for the saved snapshot regardless of how the sheet spelled the item
     // name. Only an unresolvable code rejects a row.
     let itemMatch: LiveImportPreviewRow["itemMatch"] = "Matched";
-    if (!normalizedRow.itemCode || stockMatches.length === 0) itemMatch = "Item Not Found";
+    if (!normalizedRow.itemCode) itemMatch = "Item Not Found";
     else if (stockMatches.length > 1) itemMatch = "Item Ambiguous";
+    else if (stockMatches.length === 0) itemMatch = "New Item";
 
     const priceInvalid = parts.some((part) => part.priceInvalid);
     const downpaymentInvalid = parts.some((part) => part.downpaymentInvalid);
@@ -516,7 +519,8 @@ export function buildLiveOrderPreview({
     else if (priceInvalid) result = "Invalid Price";
     else if (downpaymentInvalid) result = "Invalid Downpayment";
     else if (quantityInvalid) result = "Invalid Quantity";
-    else if (itemMatch !== "Matched") result = itemMatch;
+    else if (itemMatch === "Item Ambiguous" || itemMatch === "Item Not Found") result = itemMatch;
+    else if (itemMatch === "New Item") result = "New Item";
     else result = customerMatch === "New Customer" ? "New Customer" : "Ready";
 
     const mergedQuantity = parts.reduce(
@@ -562,7 +566,8 @@ export function buildLiveOrderPreview({
       result,
       valid:
         result === "Ready" ||
-        result === "New Customer",
+        result === "New Customer" ||
+        result === "New Item",
       existingCustomer: customerMatches.length >= 1,
       mergedQuantity,
       mergedFromRows: parts.length,
@@ -602,10 +607,8 @@ export function toConfirmationRows(preview: LiveImportPreview): unknown[] {
   return preview.rows.map((row) => ({
     facebookName: row.facebookName,
     itemCode: row.itemCode,
+    itemName: row.itemName,
     quantity: row.mergedQuantity || DEFAULT_IMPORT_QUANTITY,
-    // Confirmation rows carry the same flexibly-normalized money text the
-    // preview validated ("2,100" -> "2100"), so preview and database can never
-    // disagree about a value that passed validation.
     price: parseLiveMoney(row.price) ?? row.price,
     downpayment: parseLiveMoney(row.downpayment) ?? row.downpayment,
   }));

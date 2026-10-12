@@ -21,6 +21,7 @@ type ConfirmResult = {
 const RESULT_STYLES: Record<LiveImportResult, string> = {
   "Ready": "bg-emerald-50 text-emerald-700",
   "New Customer": "bg-gold-soft text-gold-dark",
+  "New Item": "bg-blue-50 text-blue-700",
   "Invalid Price": "bg-red-50 text-red-700",
   "Invalid Downpayment": "bg-red-50 text-red-700",
   "Invalid Quantity": "bg-red-50 text-red-700",
