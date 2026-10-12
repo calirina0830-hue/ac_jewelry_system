@@ -81,7 +81,7 @@ export async function createCustomer(
     });
     return {
       status: "error",
-      message: "The customer could not be created. Please try again.",
+      message: error.message || "The customer could not be created. Please try again.",
     };
   }
 
