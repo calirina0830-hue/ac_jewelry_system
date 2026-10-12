@@ -49,9 +49,9 @@ export function LoginForm({
         autoComplete="username"
         autoCapitalize="none"
         error={state.fieldErrors?.username}
-        label="Username"
+        label="Email or Username"
         name="username"
-        placeholder="Enter your username"
+        placeholder="Enter your email or username"
       />
       <FormField
         autoComplete="current-password"
@@ -79,9 +79,9 @@ export function ForgotPasswordForm() {
         autoComplete="username"
         autoCapitalize="none"
         error={state.fieldErrors?.username}
-        label="Username"
+        label="Email or Username"
         name="username"
-        placeholder="Enter your username"
+        placeholder="Enter your email or username"
       />
       <SubmitButton>Send reset instructions</SubmitButton>
     </form>

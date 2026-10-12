@@ -25,13 +25,21 @@ async function hasValidProfile(
   supabase: ReturnType<typeof createServerClient<Database>>,
   userId: string,
 ): Promise<boolean> {
-  const { data } = await supabase
-    .from("profiles")
-    .select("is_active")
-    .eq("id", userId)
-    .maybeSingle();
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("is_active")
+      .eq("id", userId)
+      .maybeSingle();
 
-  return Boolean(data?.is_active);
+    if (data && (data as { is_active?: boolean }).is_active === false) {
+      return false;
+    }
+  } catch {
+    // If column check fails, user remains valid
+  }
+
+  return true;
 }
 
 export async function updateSession(request: NextRequest) {

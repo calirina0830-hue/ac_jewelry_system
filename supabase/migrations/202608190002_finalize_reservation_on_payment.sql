@@ -193,8 +193,6 @@ grant execute on function public.record_reservation_payment(
 
 -- Remove the status-only shortcut. Paid is reached only by recording the final
 -- ledger payment through record_reservation_payment (directly or in bulk).
-revoke all on function public.mark_reservation_paid(uuid, timestamptz)
-  from public, anon, authenticated;
 drop function if exists public.mark_reservation_paid(uuid, timestamptz);
 
 -- These earlier full-payment RPCs were already revoked. Drop them in dependency

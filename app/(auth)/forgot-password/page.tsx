@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Reset password" };
 export default function ForgotPasswordPage() {
   return (
     <AuthCard
-      description="Enter the administrator username and we will send a secure password reset link to the configured email."
+      description="Enter your email or username and we will send a secure password reset link."
       eyebrow="Account recovery"
       footer={
         <Link className="font-bold text-gold-dark hover:underline" href="/login">

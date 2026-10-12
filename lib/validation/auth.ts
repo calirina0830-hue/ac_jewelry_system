@@ -8,12 +8,8 @@ const password = z
 const username = z
   .string()
   .trim()
-  .min(1, "Username is required.")
-  .max(64, "Username is too long.")
-  .regex(
-    /^[a-zA-Z0-9._-]+$/,
-    "Username may only contain letters, numbers, dots, underscores, and hyphens.",
-  );
+  .min(1, "Email or username is required.")
+  .max(254, "Email or username is too long.");
 
 export const loginSchema = z.object({
   username,
