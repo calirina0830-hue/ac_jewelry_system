@@ -929,6 +929,7 @@ function InlineStockModal({
           id: result.item.id,
           sku: result.item.sku,
           name: result.item.name,
+          category: result.item.category,
           imagePath: result.item.imagePath,
         },
         numericPrice,
