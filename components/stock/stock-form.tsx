@@ -179,7 +179,7 @@ export function StockForm({
           {categoryChoice === STOCK_CATEGORY_OTHER ? (
             <InputField
               errors={state.fieldErrors?.category}
-              label="Other category"
+              label="Specify Other Category"
               maxLength={STOCK_CATEGORY_MAX_LENGTH}
               name="category"
               onChange={(event) => setCustomCategory(event.target.value)}

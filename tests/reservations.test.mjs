@@ -52,24 +52,23 @@ test("blank optional values normalize safely", () => {
   assert.equal(result.items[0].discount, 0);
 });
 
-test("reservation validation rejects duplicate stock selections", () => {
+test("reservation validation allows multiple lines with the same stock item", () => {
   const result = createReservationSchema.safeParse({
     customerId,
     items: [
-      { stockItemId, quantity: "1", sellingPrice: "100", discount: "0" },
-      { stockItemId, quantity: "1", sellingPrice: "100", discount: "0" },
+      { stockItemId, quantity: "1", sellingPrice: "300", discount: "0" },
+      { stockItemId, quantity: "1", sellingPrice: "200", discount: "0" },
     ],
   });
 
-  assert.equal(result.success, false);
-  assert.equal(
-    result.error.issues.some(
-      (issue) =>
-        issue.path.join(".") === "items.1.stockItemId" &&
-        issue.message === "Each stock item can only be selected once.",
-    ),
-    true,
-  );
+  assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal(result.data.items.length, 2);
+    assert.equal(result.data.items[0].stockItemId, stockItemId);
+    assert.equal(result.data.items[0].sellingPrice, 30000);
+    assert.equal(result.data.items[1].stockItemId, stockItemId);
+    assert.equal(result.data.items[1].sellingPrice, 20000);
+  }
 });
 
 test("reservation validation rejects invalid seller-entered money", () => {
@@ -201,4 +200,38 @@ test("reservation numbers use a database sequence rather than row counts", async
   assert.match(migration, /create sequence public\.reservation_number_seq/i);
   assert.match(migration, /nextval\('public\.reservation_number_seq'\)/i);
   assert.doesNotMatch(migration, /count\s*\(\s*\*\s*\)\s*\+\s*1/i);
+});
+
+test("normalizeCustomerName handles trimming, multiple spaces, and case normalization", async () => {
+  const { normalizeCustomerName } = await import("../lib/format.ts");
+  assert.equal(normalizeCustomerName("  Maria  Santos "), "maria santos");
+  assert.equal(normalizeCustomerName("MARIA   SANTOS"), "maria santos");
+  assert.equal(normalizeCustomerName("maria santos"), "maria santos");
+  assert.equal(normalizeCustomerName("Maria Santos"), "maria santos");
+  assert.equal(normalizeCustomerName(""), "");
+  assert.equal(normalizeCustomerName(null), "");
+  assert.equal(normalizeCustomerName(undefined), "");
+
+  // Genuinely different names must NOT produce the same key
+  assert.notEqual(
+    normalizeCustomerName("Maria Santos"),
+    normalizeCustomerName("Maria Santos Jr."),
+  );
+  assert.notEqual(
+    normalizeCustomerName("Maria Santos"),
+    normalizeCustomerName("Mario Santos"),
+  );
+});
+
+test("reservationQuerySchema validates page size options and defaults to 10", async () => {
+  const { reservationQuerySchema } = await import(
+    "../lib/validation/reservations.ts"
+  );
+  assert.equal(reservationQuerySchema.parse({}).pageSize, "10");
+  assert.equal(reservationQuerySchema.parse({ pageSize: "20" }).pageSize, "20");
+  assert.equal(reservationQuerySchema.parse({ pageSize: "50" }).pageSize, "50");
+  assert.equal(reservationQuerySchema.parse({ pageSize: "all" }).pageSize, "all");
+  // Invalid values fall back to default "10"
+  assert.equal(reservationQuerySchema.parse({ pageSize: "100" }).pageSize, "10");
+  assert.equal(reservationQuerySchema.parse({ pageSize: "invalid" }).pageSize, "10");
 });

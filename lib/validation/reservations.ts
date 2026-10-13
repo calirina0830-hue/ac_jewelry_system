@@ -73,6 +73,12 @@ export const reservationItemInputSchema = z.object({
     .max(2_147_483_647, "Quantity is too large."),
   sellingPrice: requiredMoneyInput("Enter a valid selling price."),
   discount: moneyInput("Line discount"),
+  orderedAt: z
+    .preprocess(
+      (value) => (typeof value === "string" && value.trim() ? value.trim() : undefined),
+      z.iso.datetime({ offset: true }).optional(),
+    )
+    .optional(),
 }).superRefine((item, context) => {
   if (item.discount > item.sellingPrice * item.quantity) {
     context.addIssue({
@@ -101,20 +107,6 @@ const reservationFieldsSchema = z
         MAX_RESERVATION_ITEMS,
         "A reservation can contain at most " + MAX_RESERVATION_ITEMS + " items.",
       ),
-  })
-  .superRefine((value, context) => {
-    const seen = new Set<string>();
-
-    value.items.forEach((item, index) => {
-      if (seen.has(item.stockItemId)) {
-        context.addIssue({
-          code: "custom",
-          message: "Each stock item can only be selected once.",
-          path: ["items", index, "stockItemId"],
-        });
-      }
-      seen.add(item.stockItemId);
-    });
   });
 
 export const createReservationSchema = reservationFieldsSchema;
@@ -185,4 +177,5 @@ export const reservationQuerySchema = z.object({
     .catch("reserved_at"),
   direction: z.enum(["asc", "desc"]).catch("desc"),
   page: z.coerce.number().int().min(1).catch(1),
+  pageSize: z.enum(["10", "20", "50", "all"]).catch("10"),
 });

@@ -54,6 +54,11 @@ export const prepareReleaseSchema = prepareShipmentSchema.extend({
   ),
 });
 
+export const releaseItemsSchema = prepareReleaseSchema.extend({
+  releaseDate: z.string().trim().min(1, "Enter a valid release date."),
+  notes: z.string().trim().max(2000, "Notes cannot exceed 2000 characters.").optional(),
+});
+
 export const cancelShipmentSchema = z.object({
   reservationId: z.string().uuid(),
   shipmentId: shipmentIdSchema,

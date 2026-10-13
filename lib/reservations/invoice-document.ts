@@ -86,6 +86,8 @@ export interface ShipmentDocumentInput {
   notes: string | null;
   cancelReason: string | null;
   downpaymentApplied?: number;
+  remainingDownpayment?: number;
+  staffName?: string | null;
   items: ShipmentDocumentItem[];
   totalQuantity: number;
   generatedAt: string;
@@ -512,6 +514,9 @@ export function buildShipmentDocDefinition(
                   ),
                 ]
               : []),
+            ...(input.staffName
+              ? [metaRow("Processed By", input.staffName)]
+              : []),
           ],
         },
         { width: 20, text: "" },
@@ -593,6 +598,14 @@ export function buildShipmentDocDefinition(
       totalRow(
         "Downpayment Applied",
         formatCurrency(input.downpaymentApplied),
+      ),
+    );
+  }
+  if (input.remainingDownpayment !== undefined) {
+    totalsStack.push(
+      totalRow(
+        "Remaining Downpayment Balance",
+        formatCurrency(input.remainingDownpayment),
       ),
     );
   }

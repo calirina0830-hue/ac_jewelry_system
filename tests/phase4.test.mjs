@@ -188,7 +188,7 @@ test("reservation selectors use bounded authenticated search without email label
   assert.equal(form.includes("Select customer"), false);
   assert.match(form, /Quantity/);
   assert.equal(form.includes("quantityInput"), true);
-  assert.match(form, /Code: \{option\.sku\}/);
+  assert.match(form, /(?:Code|SKU):\s*<\/span>\s*\{option\.sku/);
   assert.equal(form.includes("customer.email"), false);
   assert.match(options, /INITIAL_OPTION_LIMIT = 30/);
   assert.match(stockRoute, /name\.ilike/);

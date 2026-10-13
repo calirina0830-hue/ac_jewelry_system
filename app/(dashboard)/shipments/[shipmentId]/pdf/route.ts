@@ -62,7 +62,14 @@ export async function GET(
   }
 
   const itemIds = shipmentItems.map((item) => item.reservation_item_id);
-  const [{ data: lineItems }, { data: customer }] = await Promise.all([
+  const [
+    { data: lineItems },
+    { data: customer },
+    { data: staffProfile },
+    { data: allShipments },
+    { data: payments },
+    { data: resData },
+  ] = await Promise.all([
     supabase
       .from("reservation_items")
       .select("id, sku, item_name, category, unit_price, discount, quantity")
@@ -75,7 +82,36 @@ export async function GET(
       .select("name, facebook_name, phone, address")
       .eq("id", reservation.customer_id)
       .maybeSingle(),
+    shipment.created_by
+      ? supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", shipment.created_by)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("reservation_shipments")
+      .select("status, downpayment_applied")
+      .eq("reservation_id", reservation.id),
+    supabase
+      .from("reservation_payments")
+      .select("amount")
+      .eq("reservation_id", reservation.id)
+      .is("voided_at", null),
+    supabase
+      .from("reservations")
+      .select("downpayment")
+      .eq("id", reservation.id)
+      .maybeSingle(),
   ]);
+
+  const paymentRows = payments ?? [];
+  const ledgerPaid = paymentRows.reduce((sum, row) => sum + Number(row.amount), 0);
+  const paidAmount = paymentRows.length > 0 ? ledgerPaid : Number(resData?.downpayment ?? 0);
+  const totalDownpaymentApplied = (allShipments ?? [])
+    .filter((s) => s.status === "shipped")
+    .reduce((sum, s) => sum + Number(s.downpayment_applied ?? 0), 0);
+  const remainingDownpayment = Math.max(paidAmount - totalDownpaymentApplied, 0);
 
   const lineById = new Map((lineItems ?? []).map((line) => [line.id, line]));
   const items = shipmentItems.map((item) => {
@@ -115,6 +151,8 @@ export async function GET(
       notes: shipment.notes,
       cancelReason: shipment.cancel_reason,
       downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+      remainingDownpayment,
+      staffName: staffProfile?.full_name ?? null,
       items,
       totalQuantity,
       generatedAt: new Date().toISOString(),

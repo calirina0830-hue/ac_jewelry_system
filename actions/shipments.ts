@@ -9,6 +9,7 @@ import {
   cancelShipmentSchema,
   orderedAtSchema,
   prepareReleaseSchema,
+  releaseItemsSchema,
   shipmentIdSchema,
 } from "@/lib/validation/shipments";
 
@@ -143,6 +144,89 @@ export async function prepareShipment(
   return {
     status: "success",
     message: "Shipment " + data.shipmentNo + " prepared.",
+    shipmentId: data.shipmentId,
+    shipmentNo: data.shipmentNo,
+    itemCount: data.itemCount,
+    totalQuantity: data.totalQuantity,
+  };
+}
+
+export async function createItemRelease(
+  reservationId: string,
+  items: Array<{ reservationItemId: string; quantity: number }>,
+  releaseDate: string,
+  downpaymentApplied?: string,
+  notes?: string,
+): Promise<ShipmentMutationResult> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  const parsed = releaseItemsSchema.safeParse({
+    reservationId,
+    items,
+    releaseDate,
+    downpaymentApplied,
+    notes,
+  });
+
+  if (!authorization) {
+    return {
+      status: "error",
+      message: "You do not have permission to release items.",
+    };
+  }
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message:
+        parsed.error.issues[0]?.message ?? "Review the release selection.",
+    };
+  }
+
+  const supabase = await createClient();
+  const appliedDownpayment = Number(parsed.data.downpaymentApplied);
+  const formattedDate = parsed.data.releaseDate.includes("T")
+    ? parsed.data.releaseDate
+    : parsed.data.releaseDate + "T12:00:00Z";
+
+  // Use release_reservation_items RPC
+  const { data, error } = await supabase.rpc("release_reservation_items", {
+    p_reservation_id: parsed.data.reservationId,
+    p_items: parsed.data.items.map((item) => ({
+      reservation_item_id: item.reservationItemId,
+      quantity: item.quantity,
+    })),
+    p_release_date: formattedDate,
+    p_downpayment_applied: appliedDownpayment,
+    p_notes: parsed.data.notes ?? null,
+  });
+
+  if (error || !data) {
+    console.error("Item release failed", error?.code ?? "no-data", error?.message);
+    return {
+      status: "error",
+      message: shipmentErrorMessage(error?.message ?? ""),
+    };
+  }
+
+  revalidateReservation(parsed.data.reservationId);
+  await logActivity(supabase, {
+    action: "item_release_confirmed",
+    entityType: "reservation",
+    entityId: parsed.data.reservationId,
+    description: "Released items under shipment " + data.shipmentNo + ".",
+    metadata: {
+      shipment_id: data.shipmentId,
+      shipment_no: data.shipmentNo,
+      item_count: data.itemCount,
+      total_quantity: data.totalQuantity,
+      downpayment_applied: appliedDownpayment,
+      release_date: formattedDate,
+      notes: parsed.data.notes ?? null,
+    },
+  });
+
+  return {
+    status: "success",
+    message: "Release " + data.shipmentNo + " successfully processed.",
     shipmentId: data.shipmentId,
     shipmentNo: data.shipmentNo,
     itemCount: data.itemCount,

@@ -2,12 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { transitionReservationStatus } from "@/actions/reservations";
-import {
-  InvoiceActionBar,
-  InvoiceNotes,
-} from "@/components/reservations/invoice-controls";
-import { ConfirmAction } from "@/components/ui/confirm-action";
+import { InvoiceActionBar } from "@/components/reservations/invoice-controls";
+import { InvoiceReleaseModal } from "@/components/reservations/invoice-release-modal";
 import { logActivity } from "@/lib/activity";
 import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
@@ -16,7 +12,6 @@ import {
   getInvoiceStatusLabel,
   getInvoiceTotals,
 } from "@/lib/reservations/invoice";
-import { getReservationTransitions } from "@/lib/reservations/status";
 import { computeReleaseLedger } from "@/lib/reservations/release";
 import { createClient } from "@/lib/supabase/server";
 import { reservationIdSchema } from "@/lib/validation/reservations";
@@ -43,6 +38,24 @@ export default async function ReservationInvoicePage({
 
   if (!reservation) notFound();
 
+  // Find any sibling active/reserved reservations belonging to the same customer
+  // so all items ordered by the customer appear on the invoice.
+  let siblingReservationIds: string[] = [reservation.id];
+  let siblingReservations: typeof reservation[] = [];
+  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
+    const { data: siblings } = await supabase
+      .from("reservations")
+      .select("*")
+      .eq("customer_id", reservation.customer_id)
+      .eq("status", "reserved")
+      .is("archived_at", null)
+      .order("created_at");
+    if (siblings && siblings.length > 0) {
+      siblingReservations = siblings;
+      siblingReservationIds = siblings.map((r) => r.id);
+    }
+  }
+
   const [
     { data: items },
     { data: payments },
@@ -54,12 +67,12 @@ export default async function ReservationInvoicePage({
       .select(
         "id, sku, category, item_name, quantity, unit_price, discount, line_total, ordered_at, created_at",
       )
-      .eq("reservation_id", reservation.id)
+      .in("reservation_id", siblingReservationIds)
       .order("created_at"),
     supabase
       .from("reservation_payments")
       .select("amount, voided_at")
-      .eq("reservation_id", reservation.id),
+      .in("reservation_id", siblingReservationIds),
     supabase
       .from("customers")
       .select("name, facebook_name, phone, address")
@@ -67,8 +80,9 @@ export default async function ReservationInvoicePage({
       .maybeSingle(),
     supabase
       .from("reservation_shipments")
-      .select("id, status, downpayment_applied")
-      .eq("reservation_id", reservation.id),
+      .select("id, shipment_no, status, downpayment_applied, created_at, shipped_at, notes")
+      .in("reservation_id", siblingReservationIds)
+      .order("created_at", { ascending: false }),
   ]);
 
   if (!items) notFound();
@@ -118,7 +132,18 @@ export default async function ReservationInvoicePage({
         .filter((payment) => !payment.voided_at)
         .reduce((total, payment) => total + Number(payment.amount), 0)
     : undefined;
-  const totals = getInvoiceTotals(reservation, paymentTotal);
+  const combinedReservation = siblingReservations.length > 0
+    ? {
+        ...reservation,
+        subtotal: siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0),
+        discount: siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0),
+        total: siblingReservations.reduce((sum, r) => sum + Number(r.total), 0),
+        downpayment: siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0),
+        balance: siblingReservations.reduce((sum, r) => sum + Number(r.balance), 0),
+      }
+    : reservation;
+
+  const totals = getInvoiceTotals(combinedReservation, paymentTotal);
 
   const grossTotal = releaseLedger.items.reduce(
     (sum, item) => sum + item.grossValue,
@@ -130,7 +155,7 @@ export default async function ReservationInvoicePage({
   );
   const remainingFraction = grossTotal > 0 ? grossRemaining / grossTotal : 0;
   const remainingReservationDiscount =
-    Number(reservation.discount) * remainingFraction;
+    Number(combinedReservation.discount) * remainingFraction;
   const remainingTotal = Math.max(
     releaseLedger.remainingSubtotal - remainingReservationDiscount,
     0,
@@ -152,12 +177,13 @@ export default async function ReservationInvoicePage({
       const ledger = releaseById.get(item.id);
       const remainingQty = ledger?.remainingQty ?? Number(item.quantity);
       const releasedQty = ledger?.releasedQty ?? 0;
+      const orderDate = item.ordered_at || item.created_at || reservation.reserved_at;
       return {
         id: item.id,
         sku: item.sku,
         item_name: item.item_name,
         category: item.category,
-        ordered_at: item.ordered_at,
+        ordered_at: orderDate,
         quantity: remainingQty,
         originalQty: Number(item.quantity),
         releasedQty,
@@ -170,32 +196,74 @@ export default async function ReservationInvoicePage({
     });
   const statusLabel = getInvoiceStatusLabel(reservation.status);
   const canWrite = roleCanWrite(profile?.role);
-  const cancelTransition = getReservationTransitions(
-    profile?.role,
-    reservation.status,
-  ).find((transition) => transition.to === "cancelled");
   const customerDetails = [
     { label: "Facebook / CS Name", value: customer?.facebook_name },
     { label: "Phone", value: customer?.phone },
     { label: "Address", value: customer?.address },
   ].filter((detail) => Boolean(detail.value));
 
+  const releaseItems = displayItems.map((item) => ({
+    id: item.id,
+    sku: item.sku,
+    itemName: item.item_name,
+    category: item.category,
+    orderedAt: item.ordered_at,
+    remainingQty: item.quantity,
+    originalQty: item.originalQty,
+    unitPrice: item.unit_price,
+    lineTotal: item.line_total,
+  }));
+
+  const itemMap = new Map((items ?? []).map((it) => [it.id, it]));
+  const releaseHistory = (shipments ?? []).map((shipment) => {
+    const lines = safeShipmentItems
+      .filter((sItem) => sItem.shipment_id === shipment.id)
+      .map((sItem) => {
+        const orig = itemMap.get(sItem.reservation_item_id);
+        return {
+          description: orig
+            ? `${orig.sku} - ${orig.item_name} - ${orig.category}`
+            : "Reserved item",
+          quantity: Number(sItem.quantity),
+        };
+      });
+    return {
+      id: shipment.id,
+      shipmentNo: shipment.shipment_no,
+      status: shipment.status as "pending" | "shipped" | "cancelled",
+      createdAt: shipment.created_at,
+      shippedAt: shipment.shipped_at,
+      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+      notes: shipment.notes,
+      items: lines,
+    };
+  });
+
   return (
     <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8" data-print-page>
       <div className="mb-5 space-y-3" data-print-hide>
-        <Link
-          className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
-          href={"/reservations/" + reservation.id}
-        >
-          Back to reservation
-        </Link>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <a
-            className="inline-flex h-9 items-center rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold hover:bg-canvas"
-            href={"/reservations/" + reservation.id + "/invoice/pdf"}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
+            href={"/reservations/" + reservation.id}
           >
-            Download PDF
-          </a>
+            Back to reservation
+          </Link>
+          <InvoiceReleaseModal
+            reservationId={reservation.id}
+            reservationNo={reservation.reservation_no}
+            items={releaseItems}
+            availableDownpayment={remainingUnapplied}
+            canRelease={
+              canWrite &&
+              !reservation.archived_at &&
+              ["reserved", "paid", "delivered"].includes(reservation.status)
+            }
+            history={releaseHistory}
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* Download PDF action endpoint: /invoice/pdf */}
           <InvoiceActionBar
             balance={totals.balance}
             canWrite={canWrite && !reservation.archived_at && reservation.status !== "cancelled"}
@@ -205,23 +273,6 @@ export default async function ReservationInvoicePage({
             reservationId={reservation.id}
             updatedAt={reservation.updated_at}
           />
-          {cancelTransition && !reservation.archived_at && (
-            <div className="[&_button]:h-11 [&_button]:rounded-lg">
-              <ConfirmAction
-                action={transitionReservationStatus.bind(
-                  null,
-                  reservation.id,
-                  "cancelled",
-                  reservation.updated_at,
-                )}
-                appearance="compact-danger"
-                confirmation={cancelTransition.confirmation}
-                variant="danger"
-              >
-                CANCEL
-              </ConfirmAction>
-            </div>
-          )}
         </div>
       </div>
 
@@ -315,7 +366,7 @@ export default async function ReservationInvoicePage({
             )}
           </div>
           <div>
-            <div className="border-t border-border pt-3 sm:text-left">
+            <div className="border-t border-border pt-3 sm:border-t-0 sm:pt-0 sm:text-left">
               <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
                 Invoice From
               </p>
@@ -324,13 +375,17 @@ export default async function ReservationInvoicePage({
               </p>
               <p className="text-xs text-muted">{BUSINESS.descriptor}</p>
             </div>
-            <div className="mt-4">
-              <InvoiceNotes
-                canWrite={false}
-                notes={reservation.notes}
-                reservationId={reservation.id}
-                updatedAt={reservation.updated_at}
-              />
+            <div className="mt-4 border-t border-border/70 pt-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+                NOTES:
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink">
+                {reservation.notes?.trim() ? (
+                  reservation.notes
+                ) : (
+                  <span className="text-muted">No notes recorded</span>
+                )}
+              </p>
             </div>
           </div>
         </section>
@@ -364,9 +419,12 @@ export default async function ReservationInvoicePage({
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>
                 <tr className="border-b-2 border-gold bg-gold-soft text-[10px] uppercase tracking-[0.14em] text-gold-dark">
+                  <th className="px-3 py-2.5 font-bold">
+                    Date
+                    <span className="sr-only"> (Order Date)</span>
+                  </th>
                   <th className="px-3 py-2.5 font-bold">No.</th>
                   <th className="px-3 py-2.5 font-bold">Item</th>
-                  <th className="px-3 py-2.5 font-bold">Order Date</th>
                   <th className="px-3 py-2.5 text-right font-bold">Quantity</th>
                   <th className="px-3 py-2.5 text-right font-bold">Unit Price</th>
                   <th className="px-3 py-2.5 text-right font-bold">Amount</th>
@@ -385,6 +443,9 @@ export default async function ReservationInvoicePage({
                 ) : (
                   displayItems.map((item, index) => (
                     <tr key={item.id}>
+                      <td className="whitespace-nowrap px-3 py-2.5 align-top text-sm text-muted">
+                        {formatOrderDateTime(item.ordered_at)}
+                      </td>
                       <td className="px-3 py-2.5 align-top text-sm text-muted">
                         {index + 1}
                       </td>
@@ -396,9 +457,6 @@ export default async function ReservationInvoicePage({
                             released; {item.quantity} remaining
                           </p>
                         )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2.5 align-top text-sm text-muted">
-                        {formatOrderDateTime(item.ordered_at)}
                       </td>
                       <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
                         {item.quantity}

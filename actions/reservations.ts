@@ -76,7 +76,10 @@ function databaseErrorState(message: string): FormActionState {
 
   return {
     status: "error",
-    message: mapped.message,
+    message:
+      mapped.message === "The reservation could not be saved. Please review it and try again."
+        ? `The reservation could not be saved: ${message}`
+        : mapped.message,
     fieldErrors: mapped.field ? { [mapped.field]: [mapped.message] } : undefined,
   };
 }
@@ -88,6 +91,7 @@ function toRpcItems(
     quantity: number;
     sellingPrice: number;
     discount: number;
+    orderedAt?: string;
   }>,
 ) {
   return items.map((item) => ({
@@ -96,6 +100,7 @@ function toRpcItems(
     quantity: item.quantity,
     selling_price: centsToDecimal(item.sellingPrice),
     discount: centsToDecimal(item.discount),
+    ordered_at: item.orderedAt ?? null,
   }));
 }
 
@@ -208,7 +213,7 @@ export async function updateReservation(
   );
 
   if (error || !reservationId) {
-    console.error("Reservation update failed", error?.code ?? "no-id");
+    console.error("Reservation update failed:", error?.code, error?.message, error?.details, error?.hint);
     return databaseErrorState(error?.message ?? "reservation_update_failed");
   }
 

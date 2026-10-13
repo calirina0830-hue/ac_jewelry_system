@@ -60,6 +60,24 @@ export default async function ReservationDetailsPage({
     notFound();
   }
 
+  // Find any sibling active/reserved reservations belonging to the same customer
+  // so all items ordered by the customer appear under the primary reservation view.
+  let siblingReservationIds: string[] = [reservation.id];
+  let siblingReservations: typeof reservation[] = [];
+  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
+    const { data: siblings } = await supabase
+      .from("reservations")
+      .select("*")
+      .eq("customer_id", reservation.customer_id)
+      .eq("status", "reserved")
+      .is("archived_at", null)
+      .order("created_at");
+    if (siblings && siblings.length > 0) {
+      siblingReservations = siblings;
+      siblingReservationIds = siblings.map((r) => r.id);
+    }
+  }
+
   const [
     { data: customer },
     { data: items },
@@ -74,7 +92,7 @@ export default async function ReservationDetailsPage({
     supabase
       .from("reservation_items")
       .select("*")
-      .eq("reservation_id", reservation.id)
+      .in("reservation_id", siblingReservationIds)
       .order("created_at"),
     supabase.rpc("get_reservation_status_history", {
       p_reservation_id: reservation.id,
@@ -82,14 +100,14 @@ export default async function ReservationDetailsPage({
     supabase
       .from("reservation_payments")
       .select("*")
-      .eq("reservation_id", reservation.id)
+      .in("reservation_id", siblingReservationIds)
       .order("recorded_at", { ascending: false }),
   ]);
 
   const { data: shipments } = await supabase
     .from("reservation_shipments")
     .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
-    .eq("reservation_id", reservation.id)
+    .in("reservation_id", siblingReservationIds)
     .order("created_at", { ascending: false });
   const shipmentIds = (shipments ?? []).map((shipment) => shipment.id);
   const { data: shipmentItems } = shipmentIds.length
@@ -244,9 +262,25 @@ export default async function ReservationDetailsPage({
   const activePaymentTotal = (payments ?? [])
     .filter((payment) => !payment.voided_at)
     .reduce((total, payment) => total + Number(payment.amount), 0);
+  const combinedDownpayment = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0)
+    : Number(reservation.downpayment);
   const displayedPaidAmount = payments?.length
     ? activePaymentTotal
-    : Number(reservation.downpayment);
+    : combinedDownpayment;
+
+  const combinedSubtotal = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0)
+    : Number(reservation.subtotal);
+  const combinedDiscount = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0)
+    : Number(reservation.discount);
+  const combinedTotal = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.total), 0)
+    : Number(reservation.total);
+  const combinedBalance = siblingReservations.length > 0
+    ? Math.max(combinedTotal - displayedPaidAmount, 0)
+    : Number(reservation.balance);
 
   return (
     <div className="mx-auto max-w-[1250px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -398,8 +432,8 @@ export default async function ReservationDetailsPage({
                         <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
                           <OrderDateEditor
                             canEdit={isAdmin}
-                            orderedAt={item.ordered_at}
-                            reservationId={reservation.id}
+                            orderedAt={item.ordered_at || item.created_at || reservation.reserved_at}
+                            reservationId={item.reservation_id ?? reservation.id}
                             reservationItemId={item.id}
                           />
                         </td>
@@ -580,14 +614,14 @@ export default async function ReservationDetailsPage({
               <SummaryTextRow label="Facebook / CS" value={customer.facebook_name} />
             )}
             <SummaryTextRow label="Quantity" value={String(items?.length ?? 0)} />
-            <MoneyRow label="Subtotal" value={reservation.subtotal} />
-            <MoneyRow label="Reservation discount" value={reservation.discount} />
-            <MoneyRow label="Total" strong value={reservation.total} />
+            <MoneyRow label="Subtotal" value={combinedSubtotal} />
+            <MoneyRow label="Reservation discount" value={combinedDiscount} />
+            <MoneyRow label="Total" strong value={combinedTotal} />
             <MoneyRow label="Total Paid" value={displayedPaidAmount} />
-            <MoneyRow label="Remaining Balance" strong value={reservation.balance} />
+            <MoneyRow label="Remaining Balance" strong value={combinedBalance} />
             {reservation.status === "reserved" &&
               displayedPaidAmount > 0 &&
-              Number(reservation.balance) > 0 && (
+              Number(combinedBalance) > 0 && (
                 <div className="flex justify-end">
                   <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
                     Partially Paid

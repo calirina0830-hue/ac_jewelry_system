@@ -24,6 +24,7 @@ export type ReservationInitialItem = {
   sku: string;
   category: string;
   imagePath: string | null;
+  orderedAt?: string | null;
 };
 
 export type ReservationInitialValue = {

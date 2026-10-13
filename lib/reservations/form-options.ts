@@ -70,15 +70,58 @@ export async function getReservationFormOptions({
     .order("name")
     .limit(INITIAL_OPTION_LIMIT);
 
-  if (stockError) {
-    hasError = true;
+  if (stockError || !initialStock || initialStock.some((item) => !item.category)) {
+    const { data: fallbackStock, error: fallbackError } = await supabase
+      .from("stock_items")
+      .select("id, sku, name, category, image_path")
+      .eq("is_active", true)
+      .is("archived_at", null)
+      .order("name")
+      .limit(INITIAL_OPTION_LIMIT);
+
+    if (fallbackStock && fallbackStock.length > 0) {
+      if (stockError || !initialStock) {
+        stockItems.push(
+          ...fallbackStock.map((item) => ({
+            id: item.id,
+            sku: item.sku,
+            name: item.name,
+            category: item.category ?? "",
+            imagePath: item.image_path,
+          })),
+        );
+      } else {
+        const categoryById = new Map(fallbackStock.map((s) => [s.id, s.category]));
+        stockItems.push(
+          ...initialStock.map((item) => ({
+            id: item.id,
+            sku: item.sku,
+            name: item.name,
+            category: item.category || categoryById.get(item.id) || "",
+            imagePath: item.image_path,
+          })),
+        );
+      }
+    } else if (stockError) {
+      hasError = true;
+    } else {
+      stockItems.push(
+        ...(initialStock ?? []).map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          category: item.category ?? "",
+          imagePath: item.image_path,
+        })),
+      );
+    }
   } else {
     stockItems.push(
-      ...(initialStock ?? []).map((item) => ({
+      ...initialStock.map((item) => ({
         id: item.id,
         sku: item.sku,
         name: item.name,
-        category: item.category,
+        category: item.category ?? "",
         imagePath: item.image_path,
       })),
     );

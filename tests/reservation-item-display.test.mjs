@@ -61,6 +61,9 @@ test("reservation form shows SKU, item name, and category per item", async () =>
   assert.match(form, /category: selected\.category/);
   assert.match(form, /category: selected\?\.category \?\? ""/);
   assert.match(form, /category: "",/);
+  assert.match(form, /SKU:\s*<\/span>\s*\{option\.sku/);
+  assert.match(form, /Item:\s*<\/span>\s*\{option\.name/);
+  assert.match(form, /Category:\s*<\/span>\s*<span[^>]*>\{option\.category/);
 });
 
 test("reservable stock RPC exposes the category column", async () => {

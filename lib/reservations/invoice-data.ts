@@ -28,6 +28,24 @@ export async function loadInvoiceDocument(
 
   if (!reservation) return null;
 
+  // Find any sibling active/reserved reservations belonging to the same customer
+  // so all items ordered by the customer appear on the generated invoice document.
+  let siblingReservationIds: string[] = [reservation.id];
+  let siblingReservations: typeof reservation[] = [];
+  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
+    const { data: siblings } = await supabase
+      .from("reservations")
+      .select("*")
+      .eq("customer_id", reservation.customer_id)
+      .eq("status", "reserved")
+      .is("archived_at", null)
+      .order("created_at");
+    if (siblings && siblings.length > 0) {
+      siblingReservations = siblings;
+      siblingReservationIds = siblings.map((r) => r.id);
+    }
+  }
+
   const [
     { data: items },
     { data: payments },
@@ -39,12 +57,12 @@ export async function loadInvoiceDocument(
       .select(
         "id, sku, category, item_name, quantity, unit_price, discount, line_total, ordered_at, created_at",
       )
-      .eq("reservation_id", reservation.id)
+      .in("reservation_id", siblingReservationIds)
       .order("created_at"),
     supabase
       .from("reservation_payments")
       .select("amount, voided_at")
-      .eq("reservation_id", reservation.id),
+      .in("reservation_id", siblingReservationIds),
     supabase
       .from("customers")
       .select("name, facebook_name, phone, address")
@@ -53,7 +71,7 @@ export async function loadInvoiceDocument(
     supabase
       .from("reservation_shipments")
       .select("id, status, downpayment_applied")
-      .eq("reservation_id", reservation.id),
+      .in("reservation_id", siblingReservationIds),
   ]);
 
   if (!items) return null;
@@ -73,7 +91,17 @@ export async function loadInvoiceDocument(
         .filter((payment) => !payment.voided_at)
         .reduce((total, payment) => total + Number(payment.amount), 0)
     : undefined;
-  const totals = getInvoiceTotals(reservation, paymentTotal);
+  const combinedReservation = siblingReservations.length > 0
+    ? {
+        ...reservation,
+        subtotal: siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0),
+        discount: siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0),
+        total: siblingReservations.reduce((sum, r) => sum + Number(r.total), 0),
+        downpayment: siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0),
+        balance: siblingReservations.reduce((sum, r) => sum + Number(r.balance), 0),
+      }
+    : reservation;
+  const totals = getInvoiceTotals(combinedReservation, paymentTotal);
 
   const releaseLedger = computeReleaseLedger(
     (items ?? []).map((item) => ({
@@ -105,7 +133,7 @@ export async function loadInvoiceDocument(
   );
   const remainingFraction = grossTotal > 0 ? grossRemaining / grossTotal : 0;
   const remainingReservationDiscount =
-    Number(reservation.discount) * remainingFraction;
+    Number(combinedReservation.discount) * remainingFraction;
   const remainingTotal = Math.max(
     releaseLedger.remainingSubtotal - remainingReservationDiscount,
     0,
@@ -122,18 +150,22 @@ export async function loadInvoiceDocument(
       .filter((item) => item.releasedQty > 0)
       .map((item) => item.id),
   );
+  const itemById = new Map((items ?? []).map((row) => [row.id, row]));
   const documentItems: InvoiceDocumentInput["items"] = releaseLedger.items
     .filter((item) => item.remainingQty > 0)
-    .map((item) => ({
-      description: item.description,
-      orderedAt:
-        (items ?? []).find((row) => row.id === item.id)?.ordered_at ?? null,
-      quantity: item.remainingQty,
-      unitPrice: item.unitPrice,
-      lineTotal: item.remainingSubtotal,
-      originalQty: item.quantity,
-      releasedQty: releasedItems.has(item.id) ? item.releasedQty : undefined,
-    }));
+    .map((item) => {
+      const row = itemById.get(item.id);
+      const itemDate = row?.ordered_at || row?.created_at || reservation.reserved_at || null;
+      return {
+        description: item.description,
+        orderedAt: itemDate,
+        quantity: item.remainingQty,
+        unitPrice: item.unitPrice,
+        lineTotal: item.remainingSubtotal,
+        originalQty: item.quantity,
+        releasedQty: releasedItems.has(item.id) ? item.releasedQty : undefined,
+      };
+    });
 
   return {
     reservationNo: reservation.reservation_no,

@@ -81,7 +81,24 @@ export function ReservationForm({
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState(initialValue?.customerId ?? "");
-  const [stockOptions, setStockOptions] = useState(stockItems);
+  const [stockOptions, setStockOptions] = useState<ReservationStockOption[]>(() => {
+    const map = new Map<string, ReservationStockOption>();
+    stockItems.forEach((item) => map.set(item.id, item));
+    if (initialValue?.items) {
+      initialValue.items.forEach((item) => {
+        if (item.stockItemId && !map.has(item.stockItemId)) {
+          map.set(item.stockItemId, {
+            id: item.stockItemId,
+            sku: item.sku,
+            name: item.itemName,
+            category: item.category,
+            imagePath: item.imagePath,
+          });
+        }
+      });
+    }
+    return [...map.values()];
+  });
   const [stockSearches, setStockSearches] = useState<Record<string, string>>({});
   const [pendingStockSearch, setPendingStockSearch] = useState<{
     key: string;
@@ -202,6 +219,7 @@ export function ReservationForm({
       quantity: item.quantityInput,
       sellingPrice: item.unitPrice,
       discount: item.discount,
+      orderedAt: item.orderedAt,
     })),
   );
 
@@ -375,14 +393,9 @@ export function ReservationForm({
               (stock) =>
                 stock.id === item.stockItemId ||
                 !normalizedStockSearch ||
-                stock.name.toLocaleLowerCase().includes(normalizedStockSearch) ||
-                stock.sku.toLocaleLowerCase().includes(normalizedStockSearch),
-            );
-            const selectedElsewhere = new Set(
-              items
-                .filter((candidate) => candidate.key !== item.key)
-                .map((candidate) => candidate.stockItemId)
-                .filter(Boolean),
+                stock.name?.toLocaleLowerCase().includes(normalizedStockSearch) ||
+                stock.sku?.toLocaleLowerCase().includes(normalizedStockSearch) ||
+                stock.category?.toLocaleLowerCase().includes(normalizedStockSearch),
             );
             const itemName = selectedStock?.name ?? item.itemName;
             const itemSku = selectedStock?.sku ?? item.sku;
@@ -474,6 +487,10 @@ export function ReservationForm({
                             selected.id === item.stockItemId
                               ? item.reservationItemId
                               : undefined,
+                          orderedAt:
+                            selected.id === item.stockItemId
+                              ? item.orderedAt
+                              : undefined,
                           stockItemId: selected.id,
                           quantity: 1,
                           quantityInput: "1",
@@ -488,11 +505,7 @@ export function ReservationForm({
                           imagePath: selected.imagePath,
                         });
                       }}
-                      options={visibleStockOptions.filter(
-                        (stock) =>
-                          stock.id === item.stockItemId ||
-                          !selectedElsewhere.has(stock.id),
-                      )}
+                      options={visibleStockOptions}
                       search={stockSearch}
                       selected={selectedStock}
                     />
@@ -526,7 +539,6 @@ export function ReservationForm({
                       )}
                       {visibleStockOptions.map((stock) => (
                         <option
-                          disabled={selectedElsewhere.has(stock.id)}
                           key={stock.id}
                           value={stock.id}
                         >
@@ -1396,12 +1408,18 @@ function JewelryItemCombobox({
                   alt={option.name}
                   url={getStockImageUrl(option.imagePath)}
                 />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-semibold text-ink">
-                    {option.name}
+                <span className="min-w-0 flex-1 space-y-0.5 text-xs">
+                  <span className="block truncate font-bold text-ink">
+                    <span className="text-muted font-normal">SKU: </span>
+                    {option.sku || "—"}
                   </span>
-                  <span className="block text-[11px] font-normal text-muted">
-                    Code: {option.sku}
+                  <span className="block truncate font-medium text-ink">
+                    <span className="text-muted font-normal">Item: </span>
+                    {option.name || "—"}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted">
+                    <span className="font-normal">Category: </span>
+                    <span className="font-medium text-ink">{option.category || "—"}</span>
                   </span>
                 </span>
               </button>

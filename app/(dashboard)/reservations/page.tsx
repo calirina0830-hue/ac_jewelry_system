@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -34,7 +35,7 @@ import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { RESERVATION_STATUS_OPTIONS } from "@/lib/constants/reservations";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatDate, normalizeCustomerName } from "@/lib/format";
 import { sanitizeSearchTerm, toSearchParams } from "@/lib/query";
 import {
   canRecordReservationPayment,
@@ -132,6 +133,7 @@ type ReservationsPageProps = {
     sort?: string;
     direction?: string;
     page?: string;
+    pageSize?: string;
     message?: string;
     error?: string;
   }>;
@@ -147,8 +149,11 @@ export default async function ReservationsPage({
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
   const supabase = await createClient();
-  const from = (filters.page - 1) * PAGE_SIZE;
-  const to = from + PAGE_SIZE - 1;
+
+  const isAll = filters.pageSize === "all";
+  const limit = isAll ? null : Number(filters.pageSize);
+  const from = isAll ? 0 : (filters.page - 1) * (limit ?? PAGE_SIZE);
+  const to = isAll ? undefined : from + (limit ?? PAGE_SIZE) - 1;
 
   let query = supabase.from("reservation_list").select("*", { count: "exact" });
 
@@ -226,9 +231,10 @@ export default async function ReservationsPage({
     query = query.or(condition);
   }
 
-  const { data: reservations, count, error } = await query
-    .order(sortColumn, { ascending: filters.direction === "asc" })
-    .range(from, to);
+  const orderedQuery = query.order(sortColumn, { ascending: filters.direction === "asc" });
+  const { data: reservations, count, error } = isAll
+    ? await orderedQuery.limit(2000)
+    : await orderedQuery.range(from, to ?? from + PAGE_SIZE - 1);
 
   const reservationIds = (reservations ?? []).map(
     (reservation) => reservation.id,
@@ -255,7 +261,8 @@ export default async function ReservationsPage({
     }
   }
 
-  const pageCount = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  const totalCount = count ?? 0;
+  const pageCount = isAll || !limit ? 1 : Math.max(1, Math.ceil(totalCount / limit));
   const bulkEnabled =
     filters.archive === "active" &&
     canWrite &&
@@ -267,6 +274,7 @@ export default async function ReservationsPage({
     toDate: filters.toDate || undefined,
     status: filters.status,
     archive: filters.archive,
+    pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
     sort: sortColumn,
     direction: filters.direction,
   };
@@ -278,6 +286,57 @@ export default async function ReservationsPage({
           getPaymentIneligibilityReason(reservation),
       }))
     : [];
+
+  type ReservationRow = NonNullable<typeof reservations>[number];
+  type CustomerGroup = {
+    key: string;
+    customerName: string;
+    facebookName: string | null;
+    phone: string | null;
+    items: ReservationRow[];
+    totalAmount: number;
+    totalPaid: number;
+    totalBalance: number;
+  };
+
+  const customerGroups: CustomerGroup[] = [];
+  const groupIndexByKey = new Map<string, number>();
+
+  for (const reservation of reservations ?? []) {
+    const normalizedKey =
+      normalizeCustomerName(reservation.customer_name) ||
+      normalizeCustomerName(reservation.customer_facebook_name) ||
+      reservation.id;
+
+    const existingIndex = groupIndexByKey.get(normalizedKey);
+    if (existingIndex !== undefined) {
+      const group = customerGroups[existingIndex];
+      group.items.push(reservation);
+      group.totalAmount += Number(reservation.total);
+      group.totalPaid += Number(reservation.downpayment);
+      group.totalBalance += Number(reservation.balance);
+      if (!group.facebookName && reservation.customer_facebook_name) {
+        group.facebookName = reservation.customer_facebook_name;
+      }
+      if (!group.phone && reservation.customer_phone) {
+        group.phone = reservation.customer_phone;
+      }
+    } else {
+      groupIndexByKey.set(normalizedKey, customerGroups.length);
+      customerGroups.push({
+        key: normalizedKey,
+        customerName: reservation.customer_name ?? "Unnamed Customer",
+        facebookName: reservation.customer_facebook_name ?? null,
+        phone: reservation.customer_phone ?? null,
+        items: [reservation],
+        totalAmount: Number(reservation.total),
+        totalPaid: Number(reservation.downpayment),
+        totalBalance: Number(reservation.balance),
+      });
+    }
+  }
+
+  const showingCount = reservations?.length ?? 0;
 
   return (
     <div className="mx-auto max-w-[1550px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -322,6 +381,7 @@ export default async function ReservationsPage({
             toDate: filters.toDate || undefined,
             status: tab.value,
             archive: filters.archive,
+            pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
             sort: tab.value === filters.status ? sortColumn : undefined,
             direction: filters.direction,
           });
@@ -346,7 +406,11 @@ export default async function ReservationsPage({
         <span className="mx-1 hidden w-px bg-border sm:block" />
         <Link
           className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-bold text-muted hover:border-gold hover:text-ink"
-          href="/reservations?status=all&archive=active"
+          href={
+            filters.pageSize !== "10"
+              ? `/reservations?status=all&archive=active&pageSize=${filters.pageSize}`
+              : "/reservations?status=all&archive=active"
+          }
         >
           All active
         </Link>
@@ -357,14 +421,18 @@ export default async function ReservationsPage({
               ? "border-stone-700 bg-stone-700 text-white"
               : "border-border bg-white text-muted hover:border-gold hover:text-ink")
           }
-          href="/reservations?status=all&archive=archived"
+          href={
+            filters.pageSize !== "10"
+              ? `/reservations?status=all&archive=archived&pageSize=${filters.pageSize}`
+              : "/reservations?status=all&archive=archived"
+          }
         >
           Archive
         </Link>
       </nav>
 
       <form
-        className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(300px,1fr)_145px_145px_150px_170px_auto_auto]"
+        className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(240px,1fr)_135px_135px_145px_155px_130px_auto_auto]"
         method="get"
       >
         <label className="block" htmlFor="reservation-search">
@@ -424,6 +492,22 @@ export default async function ReservationsPage({
             <option value="all">All records</option>
           </select>
         </label>
+        <label className="block" htmlFor="reservation-page-size">
+          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
+            Page Size
+          </span>
+          <select
+            className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
+            defaultValue={filters.pageSize}
+            id="reservation-page-size"
+            name="pageSize"
+          >
+            <option value="10">10 per page</option>
+            <option value="20">20 per page</option>
+            <option value="50">50 per page</option>
+            <option value="all">See All</option>
+          </select>
+        </label>
         <button className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white transition hover:bg-ink/90" type="submit">
           Apply
         </button>
@@ -441,8 +525,23 @@ export default async function ReservationsPage({
         </Link>
       </form>
 
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-muted">
+        <div>
+          Showing <strong className="text-ink">{showingCount}</strong> of{" "}
+          <strong className="text-ink">{totalCount}</strong> matching reservation{totalCount === 1 ? "" : "s"}
+          {customerGroups.length > 0 && customerGroups.length !== showingCount && (
+            <span> (grouped under <strong className="text-ink">{customerGroups.length}</strong> customer{customerGroups.length === 1 ? "" : "s"})</span>
+          )}
+        </div>
+        {filters.pageSize !== "10" && (
+          <div className="font-semibold text-gold-dark">
+            Page size: {filters.pageSize === "all" ? "See All" : filters.pageSize + " records"}
+          </div>
+        )}
+      </div>
+
       <BulkSelectionProvider rows={bulkSelectionRows}>
-      <section className="mt-6 overflow-hidden rounded-2xl border border-border bg-white shadow-card">
+      <section className="mt-3 overflow-hidden rounded-2xl border border-border bg-white shadow-card">
         {error ? (
           <div className="px-6 py-14 text-center text-sm text-red-700" role="alert">
             Reservations could not be loaded. Confirm the Phase 3 migration has
@@ -501,116 +600,194 @@ export default async function ReservationsPage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {reservations.map((reservation) => (
-                    <tr className="transition hover:bg-canvas/70" key={reservation.id}>
-                      {bulkEnabled && (
-                        <td className="px-5 py-4">
-                          <BulkRowCheckbox
-                            label={"Select " + reservation.reservation_no}
-                            value={reservation.id}
-                          />
+                  {customerGroups.map((group) => {
+                    const isMulti = group.items.length > 1;
+                    const primaryReservation = group.items[0];
+                    // Compile items from all reservations for this customer
+                    const combinedItems = group.items.flatMap(
+                      (reservation) => itemsByReservation.get(reservation.id) ?? [],
+                    );
+                    // Determine if any reservation in the group is partially paid
+                    const hasPartiallyPaid = group.items.some(
+                      (r) =>
+                        r.status === "reserved" &&
+                        Number(r.downpayment) > 0 &&
+                        Number(r.balance) > 0,
+                    );
+                    // Determine consolidated status
+                    const allSameStatus = group.items.every(
+                      (r) => r.status === primaryReservation.status,
+                    );
+                    const allArchived = group.items.every((r) => Boolean(r.archived_at));
+                    const allDelivered = group.items.every((r) => Boolean(r.delivered_at));
+
+                    // Earliest/primary operational date
+                    const operationalDate =
+                      operationalDateColumn === "paid_at"
+                        ? primaryReservation.paid_at ?? primaryReservation.reserved_at
+                        : operationalDateColumn === "delivered_at"
+                          ? primaryReservation.delivered_at ?? primaryReservation.reserved_at
+                          : operationalDateColumn === "cancelled_at"
+                            ? primaryReservation.cancelled_at ?? primaryReservation.reserved_at
+                            : primaryReservation.reserved_at;
+
+                    return (
+                      <tr className="transition hover:bg-canvas/70" key={group.key}>
+                        {bulkEnabled && (
+                          <td className="px-5 py-4">
+                            <BulkRowCheckbox
+                              label={"Select " + primaryReservation.reservation_no}
+                              value={primaryReservation.id}
+                            />
+                          </td>
+                        )}
+                        <td className="whitespace-nowrap px-5 py-4">
+                          <Link
+                            className="font-bold text-gold-dark hover:underline"
+                            href={"/reservations/" + primaryReservation.id}
+                          >
+                            {primaryReservation.reservation_no}
+                          </Link>
+                          {isMulti && (
+                            <div className="mt-0.5">
+                              <span className="inline-block rounded bg-gold/15 px-1.5 py-0.5 text-[10px] font-semibold text-gold-dark">
+                                +{group.items.length - 1} combined order{group.items.length - 1 === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                          )}
                         </td>
-                      )}
-                      <td className="whitespace-nowrap px-5 py-4">
-                        <Link className="font-bold text-gold-dark hover:underline" href={"/reservations/" + reservation.id}>
-                          {reservation.reservation_no}
-                        </Link>
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className="font-semibold text-ink">{reservation.customer_name}</p>
-                        <p className="mt-1 text-xs font-medium text-muted">
-                          {reservation.customer_facebook_name
-                            ? "Facebook / CS: " + reservation.customer_facebook_name
-                            : reservation.customer_phone ?? "No Facebook / CS name"}
-                        </p>
-                        {reservation.status === "reserved" &&
-                          Number(reservation.downpayment) > 0 &&
-                          Number(reservation.balance) > 0 && (
+                        <td className="px-5 py-4">
+                          <p className="font-semibold text-ink">{group.customerName}</p>
+                          <p className="mt-1 text-xs font-medium text-muted">
+                            {group.facebookName
+                              ? "Facebook / CS: " + group.facebookName
+                              : group.phone ?? "No Facebook / CS name"}
+                          </p>
+                          {hasPartiallyPaid && (
                             <span className="mt-1 inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
                               Partially Paid
                             </span>
                           )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <ReservationItemCell
-                          items={itemsByReservation.get(reservation.id) ?? []}
-                        />
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-ink">{formatCurrency(Number(reservation.total))}</td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(Number(reservation.downpayment))}</td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-bold text-ink">{formatCurrency(Number(reservation.balance))}</td>
-                      <td className="px-5 py-4"><ReservationStatus archived={Boolean(reservation.archived_at)} delivered={Boolean(reservation.delivered_at)} status={reservation.status} /></td>
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">
-                        {formatDate(
-                          operationalDateColumn === "paid_at"
-                            ? reservation.paid_at ?? reservation.reserved_at
-                            : operationalDateColumn === "delivered_at"
-                              ? reservation.delivered_at ?? reservation.reserved_at
-                              : operationalDateColumn === "cancelled_at"
-                                ? reservation.cancelled_at ?? reservation.reserved_at
-                                : reservation.reserved_at,
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex justify-end">
-                          <ReservationActionsMenu>
-                          <Link className="text-gold-dark" href={"/reservations/" + reservation.id}>View Reservation</Link>
-                          <Link className="text-gold-dark" href={"/reservations/" + reservation.id + "/invoice"}>View Invoice</Link>
-                          {!reservation.archived_at &&
-                            ((canWrite && reservation.status === "reserved") ||
-                              (isAdmin && reservation.status === "paid")) && (
-                            <ReservationActionsSeparator />
-                          )}
-                          {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
-                            canRecordReservationPayment(reservation) ? (
-                              <Link className="text-emerald-700" href={"/reservations/bulk/pay?ids=" + reservation.id}>Record Payment</Link>
-                            ) : needsReservationPricing(reservation) ? (
-                              <Link className="text-amber-700" href={"/reservations/" + reservation.id + "/edit"}>Complete Pricing</Link>
-                            ) : null
-                          )}
-                          {isAdmin && !reservation.archived_at && reservation.status === "paid" && (
-                            <Link className="text-red-700" href={"/reservations/bulk/revert?ids=" + reservation.id}>Revert to Reserved</Link>
-                          )}
-                          {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
-                            <Link className="text-ink" href={"/reservations/" + reservation.id + "/edit"}>Edit Reservation</Link>
-                          )}
-                          {((!reservation.archived_at &&
-                            getReservationTransitions(
-                              profile?.role,
-                              reservation.status,
-                            ).length > 0) ||
-                            isAdmin) && (
-                            <ReservationActionsSeparator />
-                          )}
-                          {!reservation.archived_at &&
-                            getReservationTransitions(
-                              profile?.role,
-                              reservation.status,
-                            ).map((transition) => (
-                              <ConfirmAction
-                                action={transitionReservationStatus.bind(
-                                  null,
-                                  reservation.id,
-                                  transition.to,
-                                  reservation.updated_at,
-                                )}
-                                confirmation={transition.confirmation}
-                                key={transition.to}
-                                variant={transition.destructive ? "danger" : "neutral"}
-                              >
-                                {transition.label}
-                              </ConfirmAction>
-                            ))}
-                          {isAdmin && (reservation.archived_at ? (
-                            <ConfirmAction action={restoreReservation.bind(null, reservation.id)} confirmation={"Restore " + reservation.reservation_no + " to the active list?"} variant="neutral">Restore</ConfirmAction>
+                        </td>
+                        <td className="px-5 py-4">
+                          <ReservationItemCell items={combinedItems} />
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-ink">
+                          {formatCurrency(group.totalAmount)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">
+                          {formatCurrency(group.totalPaid)}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm font-bold text-ink">
+                          {formatCurrency(group.totalBalance)}
+                        </td>
+                        <td className="px-5 py-4">
+                          {allSameStatus ? (
+                            <ReservationStatus
+                              archived={allArchived}
+                              delivered={allDelivered}
+                              status={primaryReservation.status}
+                            />
                           ) : (
-                            <ConfirmAction action={archiveReservation.bind(null, reservation.id)} confirmation={"Archive " + reservation.reservation_no + "? Its business status and stock commitment will remain unchanged."}>Archive</ConfirmAction>
-                          ))}
-                          </ReservationActionsMenu>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-bold text-stone-700">
+                              Multiple ({group.items.map((r) => r.status).join(", ")})
+                            </span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">
+                          {formatDate(operationalDate)}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex justify-end">
+                            <ReservationActionsMenu>
+                              {(() => {
+                                const reservation = primaryReservation;
+                                return (
+                                  <>
+                                    <Link className="text-gold-dark" href={"/reservations/" + reservation.id}>
+                                      View Reservation
+                                    </Link>
+                                    <Link className="text-gold-dark" href={"/reservations/" + reservation.id + "/invoice"}>
+                                      View Invoice
+                                    </Link>
+                                    {!reservation.archived_at &&
+                                      ((canWrite && reservation.status === "reserved") ||
+                                        (isAdmin && reservation.status === "paid")) && (
+                                      <ReservationActionsSeparator />
+                                    )}
+                                    {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
+                                      canRecordReservationPayment(reservation) ? (
+                                        <Link className="text-emerald-700" href={"/reservations/bulk/pay?ids=" + reservation.id}>
+                                          Record Payment
+                                        </Link>
+                                      ) : needsReservationPricing(reservation) ? (
+                                        <Link className="text-amber-700" href={"/reservations/" + reservation.id + "/edit"}>
+                                          Complete Pricing
+                                        </Link>
+                                      ) : null
+                                    )}
+                                    {isAdmin && !reservation.archived_at && reservation.status === "paid" && (
+                                      <Link className="text-red-700" href={"/reservations/bulk/revert?ids=" + reservation.id}>
+                                        Revert to Reserved
+                                      </Link>
+                                    )}
+                                    {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
+                                      <Link className="text-ink" href={"/reservations/" + reservation.id + "/edit"}>
+                                        Edit Reservation
+                                      </Link>
+                                    )}
+                                    {((!reservation.archived_at &&
+                                      getReservationTransitions(
+                                        profile?.role,
+                                        reservation.status,
+                                      ).length > 0) ||
+                                      isAdmin) && (
+                                      <ReservationActionsSeparator />
+                                    )}
+                                    {!reservation.archived_at &&
+                                      getReservationTransitions(
+                                        profile?.role,
+                                        reservation.status,
+                                      ).map((transition) => (
+                                        <ConfirmAction
+                                          action={transitionReservationStatus.bind(
+                                            null,
+                                            reservation.id,
+                                            transition.to,
+                                            reservation.updated_at,
+                                          )}
+                                          confirmation={transition.confirmation}
+                                          key={transition.to}
+                                          variant={transition.destructive ? "danger" : "neutral"}
+                                        >
+                                          {transition.label}
+                                        </ConfirmAction>
+                                      ))}
+                                    {isAdmin && (reservation.archived_at ? (
+                                      <ConfirmAction
+                                        action={restoreReservation.bind(null, reservation.id)}
+                                        confirmation={"Restore " + reservation.reservation_no + " to the active list?"}
+                                        variant="neutral"
+                                      >
+                                        Restore
+                                      </ConfirmAction>
+                                    ) : (
+                                      <ConfirmAction
+                                        action={archiveReservation.bind(null, reservation.id)}
+                                        confirmation={"Archive " + reservation.reservation_no + "? Its business status and stock commitment will remain unchanged."}
+                                      >
+                                        Archive
+                                      </ConfirmAction>
+                                    ))}
+                                  </>
+                                );
+                              })()}
+                            </ReservationActionsMenu>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

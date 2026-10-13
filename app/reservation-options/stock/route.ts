@@ -26,20 +26,54 @@ export async function GET(request: NextRequest) {
 
   if (search) {
     const pattern = "%" + search + "%";
-    query = query.or("name.ilike." + pattern + ",sku.ilike." + pattern);
+    query = query.or("name.ilike." + pattern + ",sku.ilike." + pattern + ",category.ilike." + pattern);
   }
 
   const { data, error } = await query;
-  if (error) {
-    return NextResponse.json({ options: [] }, { status: 500 });
+  let items = data ?? [];
+
+  if (error || items.some((item) => !item.category)) {
+    // If the database RPC is still running an older version without category
+    // or if the RPC had an error, fetch from public.stock_items directly.
+    let fallbackQuery = supabase
+      .from("stock_items")
+      .select("id, sku, name, category, image_path")
+      .eq("is_active", true)
+      .is("archived_at", null)
+      .order("name")
+      .limit(25);
+
+    if (search) {
+      const pattern = "%" + search + "%";
+      fallbackQuery = fallbackQuery.or(
+        "name.ilike." + pattern + ",sku.ilike." + pattern + ",category.ilike." + pattern,
+      );
+    }
+
+    const { data: fallbackData } = await fallbackQuery;
+    if (fallbackData && fallbackData.length > 0) {
+      if (error) {
+        items = fallbackData as typeof items;
+      } else {
+        const categoryById = new Map(
+          fallbackData.map((s) => [s.id, s.category]),
+        );
+        items = items.map((item) => ({
+          ...item,
+          category: item.category || categoryById.get(item.id) || "",
+        }));
+      }
+    } else if (error) {
+      return NextResponse.json({ options: [] }, { status: 500 });
+    }
   }
 
   return NextResponse.json({
-    options: (data ?? []).map((item) => ({
+    options: items.map((item) => ({
       id: item.id,
       sku: item.sku,
       name: item.name,
-      category: item.category,
+      category: item.category ?? "",
       imagePath: item.image_path,
     })),
   });

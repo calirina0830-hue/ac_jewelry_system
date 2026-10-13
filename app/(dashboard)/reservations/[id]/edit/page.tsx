@@ -55,6 +55,41 @@ export default async function EditReservationPage({
     excludeReservationId: reservation.id,
     includeCustomerId: reservation.customer_id,
   });
+
+  // Query stock_items for current category and info if category is missing or to seed options
+  const stockItemIds = [...new Set(items.map((item) => item.stock_item_id).filter(Boolean))];
+  const { data: stockRecords } = stockItemIds.length
+    ? await supabase
+        .from("stock_items")
+        .select("id, sku, name, category, image_path")
+        .in("id", stockItemIds)
+    : { data: [] };
+  const stockMap = new Map((stockRecords ?? []).map((s) => [s.id, s]));
+
+  // Ensure stock options include existing reservation items with their categories
+  const existingStockIds = new Set(options.stockItems.map((s) => s.id));
+  items.forEach((item) => {
+    if (item.stock_item_id && !existingStockIds.has(item.stock_item_id)) {
+      const stockInfo = stockMap.get(item.stock_item_id);
+      options.stockItems.push({
+        id: item.stock_item_id,
+        sku: stockInfo?.sku ?? item.sku,
+        name: stockInfo?.name ?? item.item_name,
+        category: stockInfo?.category ?? item.category ?? "",
+        imagePath: stockInfo?.image_path ?? item.image_path,
+      });
+      existingStockIds.add(item.stock_item_id);
+    }
+  });
+
+  const itemsWithCategory = items.map((item) => {
+    const stockInfo = stockMap.get(item.stock_item_id);
+    return {
+      ...item,
+      category: item.category || stockInfo?.category || item.category,
+    };
+  });
+
   const initialValue: ReservationInitialValue = {
     id: reservation.id,
     reservationNo: reservation.reservation_no,
@@ -63,7 +98,7 @@ export default async function EditReservationPage({
     reservationDiscount: Number(reservation.discount).toFixed(2),
     downpayment: Number(reservation.downpayment).toFixed(2),
     notes: reservation.notes ?? "",
-    items: items.map((item) => ({
+    items: itemsWithCategory.map((item) => ({
       reservationItemId: item.id,
       stockItemId: item.stock_item_id,
       quantity: item.quantity,
@@ -76,6 +111,7 @@ export default async function EditReservationPage({
       sku: item.sku,
       category: item.category ?? "",
       imagePath: item.image_path,
+      orderedAt: item.ordered_at ?? item.created_at,
     })),
   };
 

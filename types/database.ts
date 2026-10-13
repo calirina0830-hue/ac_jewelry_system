@@ -799,6 +799,24 @@ export type Database = {
           downpaymentApplied: MoneyInput;
         };
       };
+      release_reservation_items: {
+        Args: {
+          p_reservation_id: string;
+          p_items: unknown;
+          p_release_date?: string;
+          p_downpayment_applied?: MoneyInput;
+          p_notes?: string | null;
+        };
+        Returns: {
+          shipmentId: string;
+          shipmentNo: string;
+          status: string;
+          shippedAt: string;
+          itemCount: number;
+          totalQuantity: number;
+          downpaymentApplied: MoneyInput;
+        };
+      };
       reservation_downpayment_committed: {
         Args: { p_reservation_id: string };
         Returns: number;

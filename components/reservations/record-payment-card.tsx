@@ -34,7 +34,7 @@ export function RecordPaymentCard({
   const parsed = Number(amount);
   const payment = Number.isFinite(parsed) ? parsed : 0;
   const totalPaid = reservation.downpayment + payment;
-  const remaining = Math.max(reservation.balance - payment, 0);
+  const remaining = reservation.total - totalPaid;
 
   return (
     <section className="rounded-3xl border border-border bg-white p-6 shadow-card">

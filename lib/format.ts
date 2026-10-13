@@ -64,3 +64,12 @@ export const ORDER_DATE_FALLBACK = "Date not recorded";
 export function formatOrderDateTime(value: string | null | undefined): string {
   return value ? formatManilaDateTime(value) : ORDER_DATE_FALLBACK;
 }
+
+/**
+ * Normalizes customer name for grouping and comparisons:
+ * trims leading/trailing spaces, collapses multiple internal spaces, and converts to lowercase.
+ */
+export function normalizeCustomerName(name: string | null | undefined): string {
+  if (!name) return "";
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+}

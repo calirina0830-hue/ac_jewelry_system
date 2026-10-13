@@ -62,7 +62,7 @@ test("stock form exposes an Other category text box and submits one category", a
 
   assert.match(form, /name="categoryChoice"/);
   assert.match(form, /STOCK_CATEGORY_OTHER/);
-  assert.match(form, /label="Other category"/);
+  assert.match(form, /label="Specify Other Category"/);
   assert.match(form, /name="category"/);
   assert.match(form, /type="hidden"/);
   assert.match(form, /setCategoryChoice/);
