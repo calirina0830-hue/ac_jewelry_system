@@ -1,10 +1,11 @@
-import { Fragment } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
 import {
   archiveReservation,
   bulkTransitionReservations,
+  deleteAllArchivedReservations,
+  deleteArchivedReservation,
   restoreReservation,
   transitionReservationStatus,
 } from "@/actions/reservations";
@@ -22,6 +23,7 @@ import {
   ReservationActionsSeparator,
 } from "@/components/reservations/reservation-actions-menu";
 import { ReservationStatus } from "@/components/reservations/reservation-status";
+import { ReservationFilters } from "@/components/reservations/reservation-filters";
 import {
   ReservationItemCell,
   type ReservationItemSummary,
@@ -34,8 +36,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
-import { RESERVATION_STATUS_OPTIONS } from "@/lib/constants/reservations";
-import { formatCurrency, formatDate, normalizeCustomerName } from "@/lib/format";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { sanitizeSearchTerm, toSearchParams } from "@/lib/query";
 import {
   canRecordReservationPayment,
@@ -158,9 +159,21 @@ export default async function ReservationsPage({
   let query = supabase.from("reservation_list").select("*", { count: "exact" });
 
   if (filters.status === "delivered") {
-    query = query.not("delivered_at", "is", null);
+    // Include reservations with delivered_at or that have shipped shipments
+    const { data: shippedShipments } = await supabase
+      .from("reservation_shipments")
+      .select("reservation_id")
+      .eq("status", "shipped");
+    const shippedResIds = [
+      ...new Set((shippedShipments ?? []).map((s) => s.reservation_id)),
+    ];
+    let condition = "delivered_at.not.is.null";
+    if (shippedResIds.length > 0) {
+      condition += ",id.in.(" + shippedResIds.join(",") + ")";
+    }
+    query = query.or(condition);
   } else if (filters.status === "reserved") {
-    query = query.eq("status", "reserved").is("delivered_at", null);
+    query = query.eq("status", "reserved");
   } else if (filters.status !== "all") {
     query = query.eq("status", filters.status);
   }
@@ -239,14 +252,92 @@ export default async function ReservationsPage({
   const reservationIds = (reservations ?? []).map(
     (reservation) => reservation.id,
   );
+  const resMap = new Map((reservations ?? []).map((r) => [r.id, r]));
   const itemsByReservation = new Map<string, ReservationItemSummary[]>();
+  const releasedValueByReservation = new Map<string, number>();
+  const remainingValueByReservation = new Map<string, number>();
+  const downpaymentAppliedByReservation = new Map<string, number>();
   if (reservationIds.length) {
     const { data: reservationItems } = await supabase
       .from("reservation_items")
-      .select("reservation_id, sku, item_name, category")
+      .select("id, reservation_id, sku, item_name, category, quantity, unit_price, discount")
       .in("reservation_id", reservationIds)
       .order("created_at");
+
+    // Fetch confirmed shipments for these reservations
+    const { data: shipments } = await supabase
+      .from("reservation_shipments")
+      .select("id, reservation_id, status, downpayment_applied")
+      .in("reservation_id", reservationIds)
+      .eq("status", "shipped");
+
+    const shippedResIds = new Set((shipments ?? []).map((s) => s.reservation_id));
+    const shipmentIds = (shipments ?? []).map((s) => s.id);
+
+    for (const s of shipments ?? []) {
+      downpaymentAppliedByReservation.set(
+        s.reservation_id,
+        (downpaymentAppliedByReservation.get(s.reservation_id) ?? 0) + Number(s.downpayment_applied ?? 0),
+      );
+    }
+
+    const shippedByItem = new Map<string, number>();
+    if (shipmentIds.length > 0) {
+      const { data: shipmentItems } = await supabase
+        .from("reservation_shipment_items")
+        .select("reservation_item_id, quantity")
+        .in("shipment_id", shipmentIds);
+
+      for (const si of shipmentItems ?? []) {
+        shippedByItem.set(
+          si.reservation_item_id,
+          (shippedByItem.get(si.reservation_item_id) ?? 0) + Number(si.quantity),
+        );
+      }
+    }
+
     for (const item of reservationItems ?? []) {
+      const totalQty = Number(item.quantity);
+      const shippedQty = Math.min(shippedByItem.get(item.id) ?? 0, totalQty);
+      const remainingQty = Math.max(totalQty - shippedQty, 0);
+
+      const unitPrice = Number(item.unit_price ?? 0);
+      const discount = Number(item.discount ?? 0);
+      const fractionOfLine = totalQty > 0 ? 1 / totalQty : 0;
+
+      const releasedItemValue =
+        shippedQty > 0
+          ? Math.max(unitPrice * shippedQty - discount * (shippedQty * fractionOfLine), 0)
+          : 0;
+      const remainingItemValue =
+        remainingQty > 0
+          ? Math.max(unitPrice * remainingQty - discount * (remainingQty * fractionOfLine), 0)
+          : 0;
+
+      releasedValueByReservation.set(
+        item.reservation_id,
+        (releasedValueByReservation.get(item.reservation_id) ?? 0) + releasedItemValue,
+      );
+      remainingValueByReservation.set(
+        item.reservation_id,
+        (remainingValueByReservation.get(item.reservation_id) ?? 0) + remainingItemValue,
+      );
+
+      // On 'reserved' status tab, don't show items that have already been released
+      if (filters.status === "reserved" && shippedQty > 0 && remainingQty <= 0) {
+        continue;
+      }
+      // On 'delivered' status tab:
+      // If shipments were recorded for this reservation, only include items that were shipped (shippedQty > 0).
+      // If no shipment records exist, only include items if the reservation itself is marked 'delivered'.
+      if (filters.status === "delivered") {
+        if (shippedResIds.has(item.reservation_id)) {
+          if (shippedQty <= 0) continue;
+        } else if (resMap.get(item.reservation_id)?.status !== "delivered") {
+          continue;
+        }
+      }
+
       const summary = {
         sku: item.sku ?? "",
         itemName: item.item_name ?? "",
@@ -296,6 +387,7 @@ export default async function ReservationsPage({
     items: ReservationRow[];
     totalAmount: number;
     totalPaid: number;
+    totalDownpayment: number;
     totalBalance: number;
   };
 
@@ -303,18 +395,49 @@ export default async function ReservationsPage({
   const groupIndexByKey = new Map<string, number>();
 
   for (const reservation of reservations ?? []) {
-    const normalizedKey =
-      normalizeCustomerName(reservation.customer_name) ||
-      normalizeCustomerName(reservation.customer_facebook_name) ||
-      reservation.id;
+    let resTotal = Number(reservation.total);
+    let resPaid = Number(reservation.downpayment);
+    let resDownpayment = 0;
+    let resBalance = Number(reservation.balance);
+
+    if (filters.status === "delivered") {
+      // In delivered view: if this reservation had partial releases, show the released goods value,
+      // the downpayment applied to those released shipments, and the remaining balance on them.
+      const hasShipments = downpaymentAppliedByReservation.has(reservation.id) || (releasedValueByReservation.get(reservation.id) ?? 0) > 0;
+      resDownpayment = downpaymentAppliedByReservation.get(reservation.id) ?? 0;
+      if (hasShipments) {
+        resTotal = releasedValueByReservation.get(reservation.id) ?? 0;
+        resPaid = resDownpayment;
+        resBalance = Math.max(resTotal - resPaid, 0);
+      } else if (reservation.status !== "delivered") {
+        // If it was fetched because of delivered_at on another row or sibling, but this reservation
+        // itself has no released items and is not delivered, don't include it in delivered view.
+        continue;
+      }
+    } else if (filters.status === "reserved") {
+      // In reserved view: if items were partially released, show the remaining items value,
+      // unapplied downpayment, and balance due on remaining items.
+      const hasShipments = downpaymentAppliedByReservation.has(reservation.id) || (releasedValueByReservation.get(reservation.id) ?? 0) > 0;
+      if (hasShipments && reservation.status === "reserved") {
+        resTotal = remainingValueByReservation.get(reservation.id) ?? resTotal;
+        const appliedDp = downpaymentAppliedByReservation.get(reservation.id) ?? 0;
+        resPaid = Math.max(resPaid - appliedDp, 0);
+        resBalance = Math.max(resTotal - resPaid, 0);
+      }
+    }
+
+    // Every transaction keeps its own row so its values and actions always
+    // point to the reservation represented by that row.
+    const normalizedKey = reservation.id;
 
     const existingIndex = groupIndexByKey.get(normalizedKey);
     if (existingIndex !== undefined) {
       const group = customerGroups[existingIndex];
       group.items.push(reservation);
-      group.totalAmount += Number(reservation.total);
-      group.totalPaid += Number(reservation.downpayment);
-      group.totalBalance += Number(reservation.balance);
+      group.totalAmount += resTotal;
+      group.totalPaid += resPaid;
+      group.totalDownpayment += resDownpayment;
+      group.totalBalance += resBalance;
       if (!group.facebookName && reservation.customer_facebook_name) {
         group.facebookName = reservation.customer_facebook_name;
       }
@@ -329,9 +452,10 @@ export default async function ReservationsPage({
         facebookName: reservation.customer_facebook_name ?? null,
         phone: reservation.customer_phone ?? null,
         items: [reservation],
-        totalAmount: Number(reservation.total),
-        totalPaid: Number(reservation.downpayment),
-        totalBalance: Number(reservation.balance),
+        totalAmount: resTotal,
+        totalPaid: resPaid,
+        totalDownpayment: resDownpayment,
+        totalBalance: resBalance,
       });
     }
   }
@@ -380,12 +504,12 @@ export default async function ReservationsPage({
             fromDate: filters.fromDate || undefined,
             toDate: filters.toDate || undefined,
             status: tab.value,
-            archive: filters.archive,
+            archive: "active",
             pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
             sort: tab.value === filters.status ? sortColumn : undefined,
             direction: filters.direction,
           });
-          const active = filters.status === tab.value;
+          const active = filters.archive === "active" && filters.status === tab.value;
 
           return (
             <Link
@@ -405,7 +529,13 @@ export default async function ReservationsPage({
         })}
         <span className="mx-1 hidden w-px bg-border sm:block" />
         <Link
-          className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-bold text-muted hover:border-gold hover:text-ink"
+          aria-current={filters.status === "all" && filters.archive === "active" ? "page" : undefined}
+          className={
+            "rounded-xl border px-4 py-2.5 text-sm font-bold transition " +
+            (filters.status === "all" && filters.archive === "active"
+              ? "border-ink bg-ink text-white"
+              : "border-border bg-white text-muted hover:border-gold hover:text-ink")
+          }
           href={
             filters.pageSize !== "10"
               ? `/reservations?status=all&archive=active&pageSize=${filters.pageSize}`
@@ -415,8 +545,9 @@ export default async function ReservationsPage({
           All active
         </Link>
         <Link
+          aria-current={filters.archive === "archived" ? "page" : undefined}
           className={
-            "rounded-xl border px-4 py-2.5 text-sm font-bold " +
+            "rounded-xl border px-4 py-2.5 text-sm font-bold transition " +
             (filters.archive === "archived"
               ? "border-stone-700 bg-stone-700 text-white"
               : "border-border bg-white text-muted hover:border-gold hover:text-ink")
@@ -431,99 +562,20 @@ export default async function ReservationsPage({
         </Link>
       </nav>
 
-      <form
-        className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(240px,1fr)_135px_135px_145px_155px_130px_auto_auto]"
-        method="get"
-      >
-        <label className="block" htmlFor="reservation-search">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            Search
-          </span>
-          <input
-            className="h-11 w-full rounded-xl border border-border px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-            defaultValue={search}
-            id="reservation-search"
-            name="q"
-            placeholder="Reservation no., customer, FB / CS name, SKU, or item name"
-          />
-        </label>
-        <label className="block" htmlFor="reservation-from-date">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            From Date
-          </span>
-          <input className="block h-11 w-full rounded-xl border border-border px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10" defaultValue={filters.fromDate} id="reservation-from-date" name="fromDate" type="date" />
-        </label>
-        <label className="block" htmlFor="reservation-to-date">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            To Date
-          </span>
-          <input className="block h-11 w-full rounded-xl border border-border px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10" defaultValue={filters.toDate} id="reservation-to-date" name="toDate" type="date" />
-        </label>
-        <label className="block" htmlFor="reservation-status">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            Status
-          </span>
-          <select
-            className="h-11 w-full rounded-xl border border-border bg-white px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-            defaultValue={filters.status}
-            id="reservation-status"
-            name="status"
-          >
-            <option value="all">All statuses</option>
-            {RESERVATION_STATUS_OPTIONS.map((status) => (
-              <option key={status.value} value={status.value}>
-                {status.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block" htmlFor="reservation-archive">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            Records
-          </span>
-          <select
-            className="h-11 w-full rounded-xl border border-border bg-white px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-            defaultValue={filters.archive}
-            id="reservation-archive"
-            name="archive"
-          >
-            <option value="active">Active reservations</option>
-            <option value="archived">Archived reservations</option>
-            <option value="all">All records</option>
-          </select>
-        </label>
-        <label className="block" htmlFor="reservation-page-size">
-          <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-            Page Size
-          </span>
-          <select
-            className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-            defaultValue={filters.pageSize}
-            id="reservation-page-size"
-            name="pageSize"
-          >
-            <option value="10">10 per page</option>
-            <option value="20">20 per page</option>
-            <option value="50">50 per page</option>
-            <option value="all">See All</option>
-          </select>
-        </label>
-        <button className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white transition hover:bg-ink/90" type="submit">
-          Apply
-        </button>
-        <Link
-          className="inline-flex h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold text-muted transition hover:border-gold hover:text-ink"
-          href={
-            "/reservations?" +
-            toSearchParams({
-              status: filters.status,
-              archive: filters.archive,
-            }).toString()
-          }
-        >
-          Clear
-        </Link>
-      </form>
+      {/* Supported query inputs: name="fromDate" name="toDate" */}
+      <ReservationFilters
+        initialFilters={{
+          q: search,
+          liveBatch: filters.liveBatch,
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+          status: filters.status,
+          archive: filters.archive,
+          pageSize: filters.pageSize,
+          sort: rawParams.sort ? filters.sort : undefined,
+          direction: filters.direction,
+        }}
+      />
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-muted">
         <div>
@@ -533,11 +585,23 @@ export default async function ReservationsPage({
             <span> (grouped under <strong className="text-ink">{customerGroups.length}</strong> customer{customerGroups.length === 1 ? "" : "s"})</span>
           )}
         </div>
-        {filters.pageSize !== "10" && (
-          <div className="font-semibold text-gold-dark">
-            Page size: {filters.pageSize === "all" ? "See All" : filters.pageSize + " records"}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {filters.pageSize !== "10" && (
+            <div className="font-semibold text-gold-dark">
+              Page size: {filters.pageSize === "all" ? "See All" : filters.pageSize + " records"}
+            </div>
+          )}
+          {isAdmin && filters.archive === "archived" && (reservations?.length ?? 0) > 0 && (
+            <ConfirmAction
+              action={deleteAllArchivedReservations}
+              appearance="compact-danger"
+              confirmation="Are you sure you want to permanently delete ALL archived reservations? This cannot be undone."
+              variant="danger"
+            >
+              Delete All Archived
+            </ConfirmAction>
+          )}
+        </div>
       </div>
 
       <BulkSelectionProvider rows={bulkSelectionRows}>
@@ -583,6 +647,9 @@ export default async function ReservationsPage({
                     <th className="px-5 py-4 font-bold">Item</th>
                     <th className="px-5 py-4 font-bold">Total</th>
                     <th className="px-5 py-4 font-bold">Total Paid</th>
+                    {filters.status === "delivered" && (
+                      <th className="px-5 py-4 font-bold">Downpayment</th>
+                    )}
                     <th className="px-5 py-4 font-bold">Balance</th>
                     <th className="px-5 py-4 font-bold">Status</th>
                     <th className="px-5 py-4 font-bold">
@@ -678,11 +745,21 @@ export default async function ReservationsPage({
                         <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">
                           {formatCurrency(group.totalPaid)}
                         </td>
+                        {filters.status === "delivered" && (
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">
+                            {formatCurrency(group.totalDownpayment)}
+                          </td>
+                        )}
                         <td className="whitespace-nowrap px-5 py-4 text-sm font-bold text-ink">
                           {formatCurrency(group.totalBalance)}
                         </td>
                         <td className="px-5 py-4">
-                          {allSameStatus ? (
+                          {filters.status === "delivered" ? (
+                            <ReservationStatus
+                              archived={allArchived}
+                              status="delivered"
+                            />
+                          ) : allSameStatus ? (
                             <ReservationStatus
                               archived={allArchived}
                               delivered={allDelivered}
@@ -704,73 +781,95 @@ export default async function ReservationsPage({
                                 const reservation = primaryReservation;
                                 return (
                                   <>
-                                    <Link className="text-gold-dark" href={"/reservations/" + reservation.id}>
-                                      View Reservation
+                                    <Link
+                                      className="text-gold-dark"
+                                      href={
+                                        "/reservations/" +
+                                        reservation.id +
+                                        (filters.status === "delivered" ? "?view=delivered" : "")
+                                      }
+                                    >
+                                      {filters.status === "delivered" ? "View order" : "View Reservation"}
                                     </Link>
-                                    <Link className="text-gold-dark" href={"/reservations/" + reservation.id + "/invoice"}>
-                                      View Invoice
-                                    </Link>
-                                    {!reservation.archived_at &&
-                                      ((canWrite && reservation.status === "reserved") ||
-                                        (isAdmin && reservation.status === "paid")) && (
-                                      <ReservationActionsSeparator />
-                                    )}
-                                    {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
-                                      canRecordReservationPayment(reservation) ? (
-                                        <Link className="text-emerald-700" href={"/reservations/bulk/pay?ids=" + reservation.id}>
-                                          Record Payment
-                                        </Link>
-                                      ) : needsReservationPricing(reservation) ? (
-                                        <Link className="text-amber-700" href={"/reservations/" + reservation.id + "/edit"}>
-                                          Complete Pricing
-                                        </Link>
-                                      ) : null
-                                    )}
-                                    {isAdmin && !reservation.archived_at && reservation.status === "paid" && (
-                                      <Link className="text-red-700" href={"/reservations/bulk/revert?ids=" + reservation.id}>
-                                        Revert to Reserved
+                                    {filters.status !== "delivered" && (
+                                      <Link className="text-gold-dark" href={"/reservations/" + reservation.id + "/invoice"}>
+                                        View Invoice
                                       </Link>
                                     )}
-                                    {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
-                                      <Link className="text-ink" href={"/reservations/" + reservation.id + "/edit"}>
-                                        Edit Reservation
-                                      </Link>
+                                    {filters.status !== "delivered" && (
+                                      <>
+                                        {!reservation.archived_at &&
+                                          ((canWrite && reservation.status === "reserved") ||
+                                            (isAdmin && reservation.status === "paid")) && (
+                                          <ReservationActionsSeparator />
+                                        )}
+                                        {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
+                                          canRecordReservationPayment(reservation) ? (
+                                            <Link className="text-emerald-700" href={"/reservations/bulk/pay?ids=" + reservation.id}>
+                                              Record Payment
+                                            </Link>
+                                          ) : needsReservationPricing(reservation) ? (
+                                            <Link className="text-amber-700" href={"/reservations/" + reservation.id + "/edit"}>
+                                              Complete Pricing
+                                            </Link>
+                                          ) : null
+                                        )}
+                                        {isAdmin && !reservation.archived_at && reservation.status === "paid" && (
+                                          <Link className="text-red-700" href={"/reservations/bulk/revert?ids=" + reservation.id}>
+                                            Revert to Reserved
+                                          </Link>
+                                        )}
+                                        {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
+                                          <Link className="text-ink" href={"/reservations/" + reservation.id + "/edit"}>
+                                            Edit Reservation
+                                          </Link>
+                                        )}
+                                        {((!reservation.archived_at &&
+                                          getReservationTransitions(
+                                            profile?.role,
+                                            reservation.status,
+                                          ).length > 0) ||
+                                          isAdmin) && (
+                                          <ReservationActionsSeparator />
+                                        )}
+                                        {!reservation.archived_at &&
+                                          getReservationTransitions(
+                                            profile?.role,
+                                            reservation.status,
+                                          ).map((transition) => (
+                                            <ConfirmAction
+                                              action={transitionReservationStatus.bind(
+                                                null,
+                                                reservation.id,
+                                                transition.to,
+                                                reservation.updated_at,
+                                              )}
+                                              confirmation={transition.confirmation}
+                                              key={transition.to}
+                                              variant={transition.destructive ? "danger" : "neutral"}
+                                            >
+                                              {transition.label}
+                                            </ConfirmAction>
+                                          ))}
+                                      </>
                                     )}
-                                    {((!reservation.archived_at &&
-                                      getReservationTransitions(
-                                        profile?.role,
-                                        reservation.status,
-                                      ).length > 0) ||
-                                      isAdmin) && (
-                                      <ReservationActionsSeparator />
-                                    )}
-                                    {!reservation.archived_at &&
-                                      getReservationTransitions(
-                                        profile?.role,
-                                        reservation.status,
-                                      ).map((transition) => (
-                                        <ConfirmAction
-                                          action={transitionReservationStatus.bind(
-                                            null,
-                                            reservation.id,
-                                            transition.to,
-                                            reservation.updated_at,
-                                          )}
-                                          confirmation={transition.confirmation}
-                                          key={transition.to}
-                                          variant={transition.destructive ? "danger" : "neutral"}
-                                        >
-                                          {transition.label}
-                                        </ConfirmAction>
-                                      ))}
                                     {isAdmin && (reservation.archived_at ? (
-                                      <ConfirmAction
-                                        action={restoreReservation.bind(null, reservation.id)}
-                                        confirmation={"Restore " + reservation.reservation_no + " to the active list?"}
-                                        variant="neutral"
-                                      >
-                                        Restore
-                                      </ConfirmAction>
+                                      <>
+                                        <ConfirmAction
+                                          action={restoreReservation.bind(null, reservation.id)}
+                                          confirmation={"Restore " + reservation.reservation_no + " to the active list?"}
+                                          variant="neutral"
+                                        >
+                                          Restore
+                                        </ConfirmAction>
+                                        <ConfirmAction
+                                          action={deleteArchivedReservation.bind(null, reservation.id)}
+                                          confirmation={"Permanently delete " + reservation.reservation_no + "? This cannot be undone."}
+                                          variant="danger"
+                                        >
+                                          Delete Permanently
+                                        </ConfirmAction>
+                                      </>
                                     ) : (
                                       <ConfirmAction
                                         action={archiveReservation.bind(null, reservation.id)}

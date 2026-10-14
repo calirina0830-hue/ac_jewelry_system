@@ -28,24 +28,6 @@ export async function loadInvoiceDocument(
 
   if (!reservation) return null;
 
-  // Find any sibling active/reserved reservations belonging to the same customer
-  // so all items ordered by the customer appear on the generated invoice document.
-  let siblingReservationIds: string[] = [reservation.id];
-  let siblingReservations: typeof reservation[] = [];
-  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
-    const { data: siblings } = await supabase
-      .from("reservations")
-      .select("*")
-      .eq("customer_id", reservation.customer_id)
-      .eq("status", "reserved")
-      .is("archived_at", null)
-      .order("created_at");
-    if (siblings && siblings.length > 0) {
-      siblingReservations = siblings;
-      siblingReservationIds = siblings.map((r) => r.id);
-    }
-  }
-
   const [
     { data: items },
     { data: payments },
@@ -57,12 +39,12 @@ export async function loadInvoiceDocument(
       .select(
         "id, sku, category, item_name, quantity, unit_price, discount, line_total, ordered_at, created_at",
       )
-      .in("reservation_id", siblingReservationIds)
+      .eq("reservation_id", reservation.id)
       .order("created_at"),
     supabase
       .from("reservation_payments")
       .select("amount, voided_at")
-      .in("reservation_id", siblingReservationIds),
+      .eq("reservation_id", reservation.id),
     supabase
       .from("customers")
       .select("name, facebook_name, phone, address")
@@ -71,7 +53,7 @@ export async function loadInvoiceDocument(
     supabase
       .from("reservation_shipments")
       .select("id, status, downpayment_applied")
-      .in("reservation_id", siblingReservationIds),
+      .eq("reservation_id", reservation.id),
   ]);
 
   if (!items) return null;
@@ -91,17 +73,7 @@ export async function loadInvoiceDocument(
         .filter((payment) => !payment.voided_at)
         .reduce((total, payment) => total + Number(payment.amount), 0)
     : undefined;
-  const combinedReservation = siblingReservations.length > 0
-    ? {
-        ...reservation,
-        subtotal: siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0),
-        discount: siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0),
-        total: siblingReservations.reduce((sum, r) => sum + Number(r.total), 0),
-        downpayment: siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0),
-        balance: siblingReservations.reduce((sum, r) => sum + Number(r.balance), 0),
-      }
-    : reservation;
-  const totals = getInvoiceTotals(combinedReservation, paymentTotal);
+  const totals = getInvoiceTotals(reservation, paymentTotal);
 
   const releaseLedger = computeReleaseLedger(
     (items ?? []).map((item) => ({
@@ -133,7 +105,7 @@ export async function loadInvoiceDocument(
   );
   const remainingFraction = grossTotal > 0 ? grossRemaining / grossTotal : 0;
   const remainingReservationDiscount =
-    Number(combinedReservation.discount) * remainingFraction;
+    Number(reservation.discount) * remainingFraction;
   const remainingTotal = Math.max(
     releaseLedger.remainingSubtotal - remainingReservationDiscount,
     0,

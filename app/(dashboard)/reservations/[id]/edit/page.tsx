@@ -30,25 +30,46 @@ export default async function EditReservationPage({
   }
 
   const supabase = await createClient();
-  const [{ data: reservation }, { data: items }] = await Promise.all([
-    supabase
-      .from("reservations")
-      .select("*")
-      .eq("id", parsedId.data)
-      .maybeSingle(),
-    supabase
-      .from("reservation_items")
-      .select("*")
-      .eq("reservation_id", parsedId.data)
-      .order("created_at"),
-  ]);
+  const { data: reservation } = await supabase
+    .from("reservations")
+    .select("*")
+    .eq("id", parsedId.data)
+    .maybeSingle();
 
-  if (!reservation || !items) {
+  if (!reservation) {
     notFound();
   }
 
   if (reservation.archived_at || reservation.status !== "reserved") {
     redirect("/reservations/" + id + "?error=not-editable");
+  }
+
+  // Find any sibling active/reserved reservations belonging to the same customer
+  // so all items ordered by the customer appear when editing.
+  let siblingReservationIds: string[] = [reservation.id];
+  let siblingReservations: typeof reservation[] = [];
+  if (reservation.customer_id) {
+    const { data: siblings } = await supabase
+      .from("reservations")
+      .select("*")
+      .eq("customer_id", reservation.customer_id)
+      .eq("status", "reserved")
+      .is("archived_at", null)
+      .order("created_at");
+    if (siblings && siblings.length > 0) {
+      siblingReservations = siblings;
+      siblingReservationIds = siblings.map((r) => r.id);
+    }
+  }
+
+  const { data: items } = await supabase
+    .from("reservation_items")
+    .select("*")
+    .in("reservation_id", siblingReservationIds)
+    .order("created_at");
+
+  if (!items) {
+    notFound();
   }
 
   const options = await getReservationFormOptions({
@@ -90,13 +111,20 @@ export default async function EditReservationPage({
     };
   });
 
+  const combinedDiscount = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0)
+    : Number(reservation.discount);
+  const combinedDownpayment = siblingReservations.length > 0
+    ? siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0)
+    : Number(reservation.downpayment);
+
   const initialValue: ReservationInitialValue = {
     id: reservation.id,
     reservationNo: reservation.reservation_no,
     updatedAt: reservation.updated_at,
     customerId: reservation.customer_id,
-    reservationDiscount: Number(reservation.discount).toFixed(2),
-    downpayment: Number(reservation.downpayment).toFixed(2),
+    reservationDiscount: combinedDiscount.toFixed(2),
+    downpayment: combinedDownpayment.toFixed(2),
     notes: reservation.notes ?? "",
     items: itemsWithCategory.map((item) => ({
       reservationItemId: item.id,

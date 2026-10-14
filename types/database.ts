@@ -643,6 +643,16 @@ export type Database = {
         };
         Returns: string;
       };
+      create_reservation_with_downpayment: {
+        Args: {
+          p_customer_id: string;
+          p_discount: MoneyInput;
+          p_downpayment: MoneyInput;
+          p_notes: string | null;
+          p_items: unknown;
+        };
+        Returns: string;
+      };
       confirm_live_order_import: {
         Args: {
           p_original_file_name: string;
@@ -844,6 +854,14 @@ export type Database = {
           p_notes: string | null;
         };
         Returns: string;
+      };
+      delete_archived_reservation: {
+        Args: { p_reservation_id: string };
+        Returns: boolean;
+      };
+      delete_all_archived_reservations: {
+        Args: Record<string, never>;
+        Returns: number;
       };
       update_reservation: {
         Args: {

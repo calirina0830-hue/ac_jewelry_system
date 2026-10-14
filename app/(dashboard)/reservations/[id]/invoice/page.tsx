@@ -38,24 +38,6 @@ export default async function ReservationInvoicePage({
 
   if (!reservation) notFound();
 
-  // Find any sibling active/reserved reservations belonging to the same customer
-  // so all items ordered by the customer appear on the invoice.
-  let siblingReservationIds: string[] = [reservation.id];
-  let siblingReservations: typeof reservation[] = [];
-  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
-    const { data: siblings } = await supabase
-      .from("reservations")
-      .select("*")
-      .eq("customer_id", reservation.customer_id)
-      .eq("status", "reserved")
-      .is("archived_at", null)
-      .order("created_at");
-    if (siblings && siblings.length > 0) {
-      siblingReservations = siblings;
-      siblingReservationIds = siblings.map((r) => r.id);
-    }
-  }
-
   const [
     { data: items },
     { data: payments },
@@ -67,12 +49,12 @@ export default async function ReservationInvoicePage({
       .select(
         "id, sku, category, item_name, quantity, unit_price, discount, line_total, ordered_at, created_at",
       )
-      .in("reservation_id", siblingReservationIds)
+      .eq("reservation_id", reservation.id)
       .order("created_at"),
     supabase
       .from("reservation_payments")
       .select("amount, voided_at")
-      .in("reservation_id", siblingReservationIds),
+      .eq("reservation_id", reservation.id),
     supabase
       .from("customers")
       .select("name, facebook_name, phone, address")
@@ -81,7 +63,7 @@ export default async function ReservationInvoicePage({
     supabase
       .from("reservation_shipments")
       .select("id, shipment_no, status, downpayment_applied, created_at, shipped_at, notes")
-      .in("reservation_id", siblingReservationIds)
+      .eq("reservation_id", reservation.id)
       .order("created_at", { ascending: false }),
   ]);
 
@@ -132,18 +114,7 @@ export default async function ReservationInvoicePage({
         .filter((payment) => !payment.voided_at)
         .reduce((total, payment) => total + Number(payment.amount), 0)
     : undefined;
-  const combinedReservation = siblingReservations.length > 0
-    ? {
-        ...reservation,
-        subtotal: siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0),
-        discount: siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0),
-        total: siblingReservations.reduce((sum, r) => sum + Number(r.total), 0),
-        downpayment: siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0),
-        balance: siblingReservations.reduce((sum, r) => sum + Number(r.balance), 0),
-      }
-    : reservation;
-
-  const totals = getInvoiceTotals(combinedReservation, paymentTotal);
+  const totals = getInvoiceTotals(reservation, paymentTotal);
 
   const grossTotal = releaseLedger.items.reduce(
     (sum, item) => sum + item.grossValue,
@@ -155,7 +126,7 @@ export default async function ReservationInvoicePage({
   );
   const remainingFraction = grossTotal > 0 ? grossRemaining / grossTotal : 0;
   const remainingReservationDiscount =
-    Number(combinedReservation.discount) * remainingFraction;
+    Number(reservation.discount) * remainingFraction;
   const remainingTotal = Math.max(
     releaseLedger.remainingSubtotal - remainingReservationDiscount,
     0,
@@ -220,20 +191,32 @@ export default async function ReservationInvoicePage({
       .filter((sItem) => sItem.shipment_id === shipment.id)
       .map((sItem) => {
         const orig = itemMap.get(sItem.reservation_item_id);
+        const quantity = Number(sItem.quantity);
+        const originalQuantity = Number(orig?.quantity ?? 0);
+        const proratedDiscount = orig && originalQuantity > 0
+          ? (Number(orig.discount ?? 0) * quantity) / originalQuantity
+          : 0;
         return {
           description: orig
             ? `${orig.sku} - ${orig.item_name} - ${orig.category}`
             : "Reserved item",
-          quantity: Number(sItem.quantity),
+          quantity,
+          subtotal: orig
+            ? Math.max(Number(orig.unit_price) * quantity - proratedDiscount, 0)
+            : 0,
         };
       });
+    const releasedSubtotal = lines.reduce((total, line) => total + line.subtotal, 0);
+    const downpaymentApplied = Number(shipment.downpayment_applied ?? 0);
     return {
       id: shipment.id,
       shipmentNo: shipment.shipment_no,
       status: shipment.status as "pending" | "shipped" | "cancelled",
       createdAt: shipment.created_at,
       shippedAt: shipment.shipped_at,
-      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+      releasedSubtotal,
+      downpaymentApplied,
+      remainingBalance: Math.max(releasedSubtotal - downpaymentApplied, 0),
       notes: shipment.notes,
       items: lines,
     };

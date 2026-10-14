@@ -36,10 +36,11 @@ export default async function ReservationDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ message?: string; error?: string }>;
+  searchParams: Promise<{ message?: string; error?: string; view?: string }>;
 }) {
   const { id } = await params;
   const notices = await searchParams;
+  const isDeliveredView = notices.view === "delivered";
   const parsedId = reservationIdSchema.safeParse(id);
 
   if (!parsedId.success) {
@@ -60,24 +61,6 @@ export default async function ReservationDetailsPage({
     notFound();
   }
 
-  // Find any sibling active/reserved reservations belonging to the same customer
-  // so all items ordered by the customer appear under the primary reservation view.
-  let siblingReservationIds: string[] = [reservation.id];
-  let siblingReservations: typeof reservation[] = [];
-  if (reservation.customer_id && !reservation.archived_at && reservation.status === "reserved") {
-    const { data: siblings } = await supabase
-      .from("reservations")
-      .select("*")
-      .eq("customer_id", reservation.customer_id)
-      .eq("status", "reserved")
-      .is("archived_at", null)
-      .order("created_at");
-    if (siblings && siblings.length > 0) {
-      siblingReservations = siblings;
-      siblingReservationIds = siblings.map((r) => r.id);
-    }
-  }
-
   const [
     { data: customer },
     { data: items },
@@ -92,7 +75,7 @@ export default async function ReservationDetailsPage({
     supabase
       .from("reservation_items")
       .select("*")
-      .in("reservation_id", siblingReservationIds)
+      .eq("reservation_id", reservation.id)
       .order("created_at"),
     supabase.rpc("get_reservation_status_history", {
       p_reservation_id: reservation.id,
@@ -100,26 +83,27 @@ export default async function ReservationDetailsPage({
     supabase
       .from("reservation_payments")
       .select("*")
-      .in("reservation_id", siblingReservationIds)
+      .eq("reservation_id", reservation.id)
       .order("recorded_at", { ascending: false }),
   ]);
 
   const { data: shipments } = await supabase
     .from("reservation_shipments")
     .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
-    .in("reservation_id", siblingReservationIds)
+    .eq("reservation_id", reservation.id)
     .order("created_at", { ascending: false });
   const shipmentIds = (shipments ?? []).map((shipment) => shipment.id);
   const { data: shipmentItems } = shipmentIds.length
     ? await supabase
         .from("reservation_shipment_items")
-        .select("shipment_id, reservation_item_id, quantity")
+        .select("shipment_id, reservation_item_id, quantity, downpayment_allocated")
         .in("shipment_id", shipmentIds)
     : { data: [] };
   const shipmentStatusById = new Map(
     (shipments ?? []).map((shipment) => [shipment.id, shipment.status]),
   );
   const shippedByItem = new Map<string, number>();
+  const downpaymentByItem = new Map<string, number>();
   const pendingByItem = new Map<string, number>();
   const shipmentAggregates = new Map<
     string,
@@ -132,6 +116,11 @@ export default async function ReservationDetailsPage({
       shippedByItem.set(
         shipmentItem.reservation_item_id,
         (shippedByItem.get(shipmentItem.reservation_item_id) ?? 0) + quantity,
+      );
+      downpaymentByItem.set(
+        shipmentItem.reservation_item_id,
+        (downpaymentByItem.get(shipmentItem.reservation_item_id) ?? 0) +
+          Number(shipmentItem.downpayment_allocated ?? 0),
       );
     } else if (status === "pending") {
       pendingByItem.set(
@@ -157,6 +146,60 @@ export default async function ReservationDetailsPage({
     shipped: shippedByItem.get(item.id) ?? 0,
     pending: pendingByItem.get(item.id) ?? 0,
   }));
+  const remainingItems = (items ?? [])
+    .map((item) => {
+      const shippedQty = shippedByItem.get(item.id) ?? 0;
+      const remainingQty = Math.max(Number(item.quantity) - shippedQty, 0);
+      const unitPrice = Number(item.unit_price);
+      const discount = Number(item.discount ?? 0);
+      const lineDiscount = Number(item.quantity) > 0 ? (discount * remainingQty) / Number(item.quantity) : 0;
+      const lineTotal = Math.max(unitPrice * remainingQty - lineDiscount, 0);
+      return {
+        ...item,
+        remainingQty,
+        shippedQty,
+        remainingLineTotal: lineTotal,
+        displayDownpayment: 0,
+      };
+    })
+    .filter((item) => item.remainingQty > 0);
+  const hasShippedRecords = (shipments ?? []).some(
+    (shipment) => shipment.status === "shipped",
+  );
+  const deliveredItems = (items ?? [])
+    .map((item) => {
+      const originalQty = Number(item.quantity);
+      const deliveredQty = Math.min(
+        shippedByItem.get(item.id) ??
+          (reservation.status === "delivered" && !hasShippedRecords
+            ? originalQty
+            : 0),
+        originalQty,
+      );
+      const itemDiscount = Number(item.discount ?? 0);
+      const deliveredDiscount = originalQty > 0
+        ? (itemDiscount * deliveredQty) / originalQty
+        : 0;
+      return {
+        ...item,
+        displayQuantity: deliveredQty,
+        displayDiscount: deliveredDiscount,
+        displayDownpayment: downpaymentByItem.get(item.id) ?? 0,
+        displayLineTotal: Math.max(
+          Number(item.unit_price) * deliveredQty - deliveredDiscount,
+          0,
+        ),
+      };
+    })
+    .filter((item) => item.displayQuantity > 0);
+  const displayedItems = isDeliveredView
+    ? deliveredItems
+    : remainingItems.map((item) => ({
+        ...item,
+        displayQuantity: item.remainingQty,
+        displayDiscount: Number(item.discount ?? 0),
+        displayLineTotal: item.remainingLineTotal,
+      }));
   const shipmentRows = (shipments ?? []).map((shipment) => {
     const aggregate = shipmentAggregates.get(shipment.id) ?? {
       itemCount: 0,
@@ -181,6 +224,30 @@ export default async function ReservationDetailsPage({
       (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
       0,
     );
+  const originalGrossTotal = (items ?? []).reduce(
+    (total, item) => total + Number(item.unit_price) * Number(item.quantity),
+    0,
+  );
+  const deliveredGrossTotal = deliveredItems.reduce(
+    (total, item) => total + Number(item.unit_price) * item.displayQuantity,
+    0,
+  );
+  const deliveredItemSubtotal = deliveredItems.reduce(
+    (total, item) => total + item.displayLineTotal,
+    0,
+  );
+  const deliveredReservationDiscount = originalGrossTotal > 0
+    ? Number(reservation.discount) * (deliveredGrossTotal / originalGrossTotal)
+    : 0;
+  const deliveredSubtotal = Math.max(
+    deliveredItemSubtotal - deliveredReservationDiscount,
+    0,
+  );
+  const deliveredBalance = Math.max(deliveredSubtotal - usedDownpayment, 0);
+  const deliveredQuantity = deliveredItems.reduce(
+    (total, item) => total + item.displayQuantity,
+    0,
+  );
   const reservedDownpayment = (shipments ?? [])
     .filter((shipment) => shipment.status === "pending")
     .reduce(
@@ -262,47 +329,43 @@ export default async function ReservationDetailsPage({
   const activePaymentTotal = (payments ?? [])
     .filter((payment) => !payment.voided_at)
     .reduce((total, payment) => total + Number(payment.amount), 0);
-  const combinedDownpayment = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0)
-    : Number(reservation.downpayment);
-  const displayedPaidAmount = payments?.length
-    ? activePaymentTotal
-    : combinedDownpayment;
-
-  const combinedSubtotal = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.subtotal), 0)
-    : Number(reservation.subtotal);
-  const combinedDiscount = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0)
-    : Number(reservation.discount);
-  const combinedTotal = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.total), 0)
-    : Number(reservation.total);
-  const combinedBalance = siblingReservations.length > 0
-    ? Math.max(combinedTotal - displayedPaidAmount, 0)
-    : Number(reservation.balance);
+  const displayedPaidAmount = isDeliveredView
+    ? usedDownpayment
+    : payments?.length
+      ? activePaymentTotal
+      : Number(reservation.downpayment);
+  const combinedSubtotal = Number(reservation.subtotal);
+  const combinedDiscount = Number(reservation.discount);
+  const combinedTotal = Number(reservation.total);
+  const combinedBalance = Number(reservation.balance);
 
   return (
     <div className="mx-auto max-w-[1250px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
       <PageHeader
-        description="Customer commitment, jewelry snapshots, and server-verified financial totals."
-        eyebrow="Reservation details"
+        description={
+          isDeliveredView
+            ? "Customer and item details recorded for delivered goods."
+            : "Customer commitment, jewelry snapshots, and server-verified financial totals."
+        }
+        eyebrow={isDeliveredView ? "Delivered order" : "Reservation details"}
         title={reservation.reservation_no}
       >
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           <Link
             className="inline-flex h-9 items-center rounded-lg px-2 text-sm font-semibold text-muted transition hover:bg-white hover:text-ink"
-            href="/reservations"
+            href={isDeliveredView ? "/reservations?status=delivered" : "/reservations"}
           >
-            &larr; Reservations
+            {isDeliveredView ? "← Delivered orders" : "← Reservations"}
           </Link>
-          <Link
-            className="inline-flex h-9 items-center rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold hover:bg-canvas"
-            href={"/reservations/" + reservation.id + "/invoice"}
-          >
-            Invoice
-          </Link>
-          {canWrite && !reservation.archived_at && reservation.status === "reserved" && (
+          {!isDeliveredView && (
+            <Link
+              className="inline-flex h-9 items-center rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold hover:bg-canvas"
+              href={"/reservations/" + reservation.id + "/invoice"}
+            >
+              Invoice
+            </Link>
+          )}
+          {!isDeliveredView && canWrite && !reservation.archived_at && reservation.status === "reserved" && (
             <Link
               className="inline-flex h-9 items-center rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold hover:bg-canvas"
               href={"/reservations/" + reservation.id + "/edit"}
@@ -310,7 +373,7 @@ export default async function ReservationDetailsPage({
               {needsReservationPricing(reservation) ? "Complete pricing" : "Edit"}
             </Link>
           )}
-          {canWrite && canRecordReservationPayment(reservation) && (
+          {!isDeliveredView && canWrite && canRecordReservationPayment(reservation) && (
               <Link
                 className="relative z-10 inline-flex h-9 items-center rounded-lg bg-gold px-3.5 text-sm font-bold text-white transition hover:bg-gold-dark"
                 href={"/reservations/bulk/pay?ids=" + reservation.id}
@@ -318,7 +381,7 @@ export default async function ReservationDetailsPage({
                 Record payment
               </Link>
             )}
-          {!reservation.archived_at &&
+          {!isDeliveredView && !reservation.archived_at &&
             transitions.map((transition) => (
               <ConfirmAction
                 action={transitionReservationStatus.bind(
@@ -343,7 +406,7 @@ export default async function ReservationDetailsPage({
                     : transition.label}
               </ConfirmAction>
             ))}
-          {isAdmin &&
+          {!isDeliveredView && isAdmin &&
             !reservation.archived_at &&
             reservation.status === "paid" && (
               <Link
@@ -356,7 +419,7 @@ export default async function ReservationDetailsPage({
         </div>
       </PageHeader>
       <PageNotice error={notices.error} message={notices.message} />
-      {!reservation.pricing_complete && (
+      {!isDeliveredView && !reservation.pricing_complete && (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-900">
           Complete item pricing before recording a payment.
         </div>
@@ -396,81 +459,108 @@ export default async function ReservationDetailsPage({
               <div className="flex flex-wrap items-center gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
-                    Jewelry items
+                    {isDeliveredView ? "Delivered items" : "Jewelry items"}
                   </p>
                   <h2 className="mt-1 font-serif text-2xl text-ink">
-                    {items?.length ?? 0} reserved {items?.length === 1 ? "piece" : "pieces"}
+                    {isDeliveredView
+                      ? `${deliveredQuantity} ${deliveredQuantity === 1 ? "piece" : "pieces"} delivered`
+                      : `${remainingItems.length} ${remainingItems.length === 1 ? "piece" : "pieces"} on shop`}
                   </h2>
                 </div>
-                <div className="ml-auto">
-                  <ReleaseStatusBadge status={releaseStatus} />
-                </div>
+                {!isDeliveredView && (
+                  <div className="ml-auto">
+                    <ReleaseStatusBadge status={releaseStatus} />
+                  </div>
+                )}
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1000px] border-collapse text-left">
+              <table className="w-full min-w-[1100px] border-collapse text-left">
                 <thead className="bg-canvas text-[11px] uppercase tracking-[0.14em] text-muted">
                   <tr>
                     <th className="px-6 py-4 font-bold">Item</th>
                     <th className="px-5 py-4 font-bold">Order date</th>
                     <th className="px-5 py-4 font-bold">Unit price</th>
-                    <th className="px-5 py-4 font-bold">Quantity</th>
+                    <th className="px-5 py-4 font-bold">{isDeliveredView ? "Delivered quantity" : "Quantity"}</th>
+                    {isDeliveredView && <th className="px-5 py-4 font-bold">Downpayment</th>}
                     <th className="px-5 py-4 font-bold">Discount</th>
                     <th className="px-6 py-4 text-right font-bold">Line total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {items?.map((item) => {
-                    return (
-                      <tr key={item.id}>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <StockImage alt={item.item_name} url={getStockImageUrl(item.image_path)} />
-                            <span className="font-semibold text-ink">{item.item_name}</span>
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
-                          <OrderDateEditor
-                            canEdit={isAdmin}
-                            orderedAt={item.ordered_at || item.created_at || reservation.reserved_at}
-                            reservationId={item.reservation_id ?? reservation.id}
-                            reservationItemId={item.id}
-                          />
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">{formatCurrency(Number(item.unit_price))}</td>
-                        <td className="px-5 py-4 text-sm font-semibold text-ink">{item.quantity}</td>
-                        <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(Number(item.discount))}</td>
-                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-bold text-ink">{formatCurrency(Number(item.line_total))}</td>
-                      </tr>
-                    );
-                  })}
+                  {displayedItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={isDeliveredView ? 7 : 6} className="px-6 py-8 text-center text-sm text-muted">
+                        {isDeliveredView
+                          ? "No delivered items are recorded for this order."
+                          : "All items have been delivered to the customer."}
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedItems.map((item) => {
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <StockImage alt={item.item_name} url={getStockImageUrl(item.image_path)} />
+                              <span className="font-semibold text-ink">{item.item_name}</span>
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
+                            <OrderDateEditor
+                              canEdit={false}
+                              orderedAt={item.ordered_at || item.created_at || reservation.reserved_at}
+                              reservationId={item.reservation_id ?? reservation.id}
+                              reservationItemId={item.id}
+                            />
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">{formatCurrency(Number(item.unit_price))}</td>
+                          <td className="px-5 py-4 text-sm font-semibold text-ink">{item.displayQuantity}</td>
+                          {isDeliveredView && (
+                            <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
+                              {formatCurrency(item.displayDownpayment)}
+                            </td>
+                          )}
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(item.displayDiscount)}</td>
+                          <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-bold text-ink">{formatCurrency(item.displayLineTotal)}</td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
+            {isDeliveredView && (
+              <DeliveredRecords
+                shipments={shipmentRows.filter((shipment) => shipment.status === "shipped")}
+              />
+            )}
           </section>
 
-          <ShippingPanel
-            canShip={canShip}
-            canWrite={canWrite}
-            downpayment={displayedPaidAmount}
-            isAdmin={isAdmin}
-            items={shippingItems}
-            reservationId={reservation.id}
-            reservationNo={reservation.reservation_no}
-            reservedDownpayment={reservedDownpayment}
-            shipments={shipmentRows}
-            usedDownpayment={usedDownpayment}
-          />
+          {!isDeliveredView && (
+            <ShippingPanel
+              canShip={canShip}
+              canWrite={canWrite}
+              downpayment={displayedPaidAmount}
+              isAdmin={isAdmin}
+              items={shippingItems}
+              reservationId={reservation.id}
+              reservationNo={reservation.reservation_no}
+              reservedDownpayment={reservedDownpayment}
+              shipments={shipmentRows}
+              usedDownpayment={usedDownpayment}
+            />
+          )}
 
-          <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
+          {!isDeliveredView && <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
             <InfoItem label="Reservation notes">
               <span className="whitespace-pre-wrap">
                 {reservation.notes ?? "No notes recorded."}
               </span>
             </InfoItem>
-          </section>
+          </section>}
 
-          <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
+          {!isDeliveredView && <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
               Payments
             </p>
@@ -562,9 +652,9 @@ export default async function ReservationDetailsPage({
             ) : (
               <p className="mt-5 text-sm text-muted">No payment records yet.</p>
             )}
-          </section>
+          </section>}
 
-          <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
+          {!isDeliveredView && <section className="rounded-3xl border border-border bg-white p-6 shadow-card sm:p-8">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
               Status history
             </p>
@@ -593,7 +683,7 @@ export default async function ReservationDetailsPage({
                 No status history is available yet.
               </p>
             )}
-          </section>
+          </section>}
         </div>
 
         <aside className="h-fit rounded-3xl border border-border bg-white p-6 shadow-card">
@@ -603,8 +693,8 @@ export default async function ReservationDetailsPage({
             </p>
             <ReservationStatus
               archived={Boolean(reservation.archived_at)}
-              delivered={Boolean(reservation.delivered_at)}
-              status={reservation.status}
+              delivered={isDeliveredView ? undefined : Boolean(reservation.delivered_at)}
+              status={isDeliveredView ? "delivered" : reservation.status}
             />
           </div>
           <dl className="mt-6 space-y-4 text-sm">
@@ -613,13 +703,33 @@ export default async function ReservationDetailsPage({
             {customer?.facebook_name && (
               <SummaryTextRow label="Facebook / CS" value={customer.facebook_name} />
             )}
-            <SummaryTextRow label="Quantity" value={String(items?.length ?? 0)} />
-            <MoneyRow label="Subtotal" value={combinedSubtotal} />
-            <MoneyRow label="Reservation discount" value={combinedDiscount} />
-            <MoneyRow label="Total" strong value={combinedTotal} />
-            <MoneyRow label="Total Paid" value={displayedPaidAmount} />
-            <MoneyRow label="Remaining Balance" strong value={combinedBalance} />
-            {reservation.status === "reserved" &&
+            <SummaryTextRow
+              label={isDeliveredView ? "Delivered quantity" : "Quantity"}
+              value={String(isDeliveredView ? deliveredQuantity : items?.length ?? 0)}
+            />
+            <MoneyRow
+              label={isDeliveredView ? "Delivered item subtotal" : "Subtotal"}
+              value={isDeliveredView ? deliveredItemSubtotal : combinedSubtotal}
+            />
+            <MoneyRow
+              label={isDeliveredView ? "Allocated reservation discount" : "Reservation discount"}
+              value={isDeliveredView ? deliveredReservationDiscount : combinedDiscount}
+            />
+            <MoneyRow
+              label={isDeliveredView ? "Delivered total" : "Total"}
+              strong
+              value={isDeliveredView ? deliveredSubtotal : combinedTotal}
+            />
+            <MoneyRow
+              label={isDeliveredView ? "Downpayment applied" : "Total Paid"}
+              value={displayedPaidAmount}
+            />
+            <MoneyRow
+              label={isDeliveredView ? "Balance on delivered items" : "Remaining Balance"}
+              strong
+              value={isDeliveredView ? deliveredBalance : combinedBalance}
+            />
+            {!isDeliveredView && reservation.status === "reserved" &&
               displayedPaidAmount > 0 &&
               Number(combinedBalance) > 0 && (
                 <div className="flex justify-end">
@@ -629,7 +739,7 @@ export default async function ReservationDetailsPage({
                 </div>
               )}
           </dl>
-          {displayedPaidAmount > 0 && (
+          {!isDeliveredView && displayedPaidAmount > 0 && (
             <dl className="mt-5 space-y-3 rounded-2xl border border-border bg-canvas/40 p-4 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-xs font-bold uppercase tracking-[0.15em] text-muted">
@@ -656,7 +766,7 @@ export default async function ReservationDetailsPage({
               />
             </dl>
           )}
-          <dl className="mt-6 space-y-5 border-t border-border pt-6">
+          {!isDeliveredView && <dl className="mt-6 space-y-5 border-t border-border pt-6">
             <RecordItem label="Reserved at" value={formatDateTime(reservation.reserved_at)} />
             {reservation.paid_at && <RecordItem label="Paid at" value={formatDateTime(reservation.paid_at)} />}
             {reservation.delivered_at && <RecordItem label="Delivered at" value={formatDateTime(reservation.delivered_at)} />}
@@ -664,8 +774,8 @@ export default async function ReservationDetailsPage({
             <RecordItem label="Created by" value={createdBy} />
             <RecordItem label="Created at" value={formatDateTime(reservation.created_at)} />
             <RecordItem label="Last updated" value={formatDateTime(reservation.updated_at)} />
-          </dl>
-          {isAdmin && (
+          </dl>}
+          {!isDeliveredView && isAdmin && (
             <div className="mt-6 border-t border-border pt-5">
               {reservation.archived_at ? (
                 <ConfirmAction action={restoreReservation.bind(null, reservation.id)} confirmation={"Restore " + reservation.reservation_no + " to the active list?"} variant="neutral">
@@ -680,6 +790,70 @@ export default async function ReservationDetailsPage({
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+function DeliveredRecords({
+  shipments,
+}: {
+  shipments: Array<{
+    id: string;
+    shipmentNo: string;
+    createdAt: string;
+    shippedAt: string | null;
+    totalQuantity: number;
+    downpaymentApplied: number;
+  }>;
+}) {
+  return (
+    <div className="border-t border-border px-6 py-5 sm:px-8">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
+        Deliveries
+      </p>
+      <h2 className="mt-1 font-serif text-2xl text-ink">Delivery records</h2>
+      {shipments.length ? (
+        <div className="mt-5 space-y-3">
+          {shipments.map((shipment) => (
+            <div
+              className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-canvas/50 p-4"
+              key={shipment.id}
+            >
+              <div>
+                <p className="font-bold text-ink">{shipment.shipmentNo}</p>
+                <p className="mt-1 text-sm text-muted">
+                  {shipment.totalQuantity} delivered unit{shipment.totalQuantity === 1 ? "" : "s"}
+                  {" · "}
+                  {formatDateTime(shipment.shippedAt ?? shipment.createdAt)}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-ink">
+                  Downpayment applied: {formatCurrency(shipment.downpaymentApplied)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                <Link
+                  className="text-sm font-bold text-gold-dark hover:underline"
+                  href={"/shipments/" + shipment.id + "/pdf?view=inline"}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  View invoice
+                </Link>
+                <Link
+                  className="text-sm font-bold text-gold-dark hover:underline"
+                  href={"/shipments/" + shipment.id + "/pdf"}
+                >
+                  Download PDF
+                </Link>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-5 text-sm text-muted">
+          This order was marked delivered without item-level delivery records.
+        </p>
+      )}
     </div>
   );
 }

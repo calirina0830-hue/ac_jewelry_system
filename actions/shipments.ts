@@ -38,6 +38,7 @@ function revalidateReservation(id: string) {
   revalidatePath("/reservations");
   revalidatePath("/reservations/" + id);
   revalidatePath("/reservations/" + id + "/invoice");
+  revalidatePath("/shipments");
   revalidatePath("/dashboard");
 }
 
@@ -78,7 +79,9 @@ function shipmentErrorMessage(message: string): string {
   if (message.includes("invalid_downpayment_application")) {
     return "Enter a valid downpayment amount.";
   }
-  return "Unable to complete the shipment action. Please try again.";
+  return message && !message.includes("P0001")
+    ? message
+    : "Unable to complete the shipment action. Please try again.";
 }
 
 export async function prepareShipment(
@@ -182,55 +185,351 @@ export async function createItemRelease(
   }
 
   const supabase = await createClient();
-  const appliedDownpayment = Number(parsed.data.downpaymentApplied);
+  const requestedDownpayment = Number(parsed.data.downpaymentApplied);
   const formattedDate = parsed.data.releaseDate.includes("T")
     ? parsed.data.releaseDate
     : parsed.data.releaseDate + "T12:00:00Z";
 
-  // Use release_reservation_items RPC
-  const { data, error } = await supabase.rpc("release_reservation_items", {
-    p_reservation_id: parsed.data.reservationId,
-    p_items: parsed.data.items.map((item) => ({
-      reservation_item_id: item.reservationItemId,
-      quantity: item.quantity,
-    })),
-    p_release_date: formattedDate,
-    p_downpayment_applied: appliedDownpayment,
-    p_notes: parsed.data.notes ?? null,
-  });
+  // Confirm every selected item belongs to this reservation before releasing it.
+  const itemIds = parsed.data.items.map((i) => i.reservationItemId);
+  const { data: itemRows, error: itemError } = await supabase
+    .from("reservation_items")
+    .select("id, reservation_id, unit_price, discount, quantity")
+    .in("id", itemIds);
 
-  if (error || !data) {
-    console.error("Item release failed", error?.code ?? "no-data", error?.message);
+  if (
+    itemError ||
+    !itemRows ||
+    itemRows.length !== itemIds.length ||
+    itemRows.some((item) => item.reservation_id !== parsed.data.reservationId)
+  ) {
     return {
       status: "error",
-      message: shipmentErrorMessage(error?.message ?? ""),
+      message: "One or more selected items do not belong to this reservation.",
     };
   }
 
+  const itemDetailsMap = new Map(
+    itemRows.map((r) => [
+      r.id,
+      {
+        reservationId: r.reservation_id,
+        unitPrice: Number(r.unit_price),
+        discount: Number(r.discount ?? 0),
+        totalQty: Number(r.quantity),
+      },
+    ]),
+  );
+
+  // Group items by their actual reservation_id and calculate total released value per group
+  const groupsByResId = new Map<string, Array<{ reservationItemId: string; quantity: number }>>();
+  const groupReleasedValueMap = new Map<string, number>();
+
+  for (const item of parsed.data.items) {
+    const details = itemDetailsMap.get(item.reservationItemId);
+    const actualResId = details?.reservationId ?? parsed.data.reservationId;
+    const group = groupsByResId.get(actualResId) ?? [];
+    group.push(item);
+    groupsByResId.set(actualResId, group);
+
+    const unitPrice = details?.unitPrice ?? 0;
+    const discount = details?.discount ?? 0;
+    const totalQty = details?.totalQty ?? item.quantity;
+    const lineDiscount = totalQty > 0 ? (discount * item.quantity) / totalQty : 0;
+    const itemValue = Math.max(unitPrice * item.quantity - lineDiscount, 0);
+
+    const prevValue = groupReleasedValueMap.get(actualResId) ?? 0;
+    groupReleasedValueMap.set(actualResId, prevValue + itemValue);
+  }
+
+  // Get available downpayment for each reservation in the groups
+  const distinctResIds = Array.from(groupsByResId.keys());
+  const { data: resRows } = await supabase
+    .from("reservations")
+    .select("id, downpayment")
+    .in("id", distinctResIds);
+
+  const resDownpaymentMap = new Map((resRows ?? []).map((r) => [r.id, Number(r.downpayment)]));
+
+  // Determine available downpayment per reservation
+  const availableDownpaymentMap = new Map<string, number>();
+  for (const resId of distinctResIds) {
+    const { data: committed } = await supabase.rpc("reservation_downpayment_committed", {
+      p_reservation_id: resId,
+    });
+    const totalDownpayment = resDownpaymentMap.get(resId) ?? 0;
+    const committedAmount = Number(committed ?? 0);
+    availableDownpaymentMap.set(resId, Math.max(totalDownpayment - committedAmount, 0));
+  }
+
+  // Distribute requestedDownpayment across the reservations up to their available downpayment
+  // AND capped at each group's released value (since DB forbids downpayment > released value)
+  let remainingDownpaymentToApply = requestedDownpayment;
+  const downpaymentByResId = new Map<string, number>();
+
+  // Prioritize the current reservationId first if it's in the group
+  const orderedResIds = [
+    ...distinctResIds.filter((id) => id === parsed.data.reservationId),
+    ...distinctResIds.filter((id) => id !== parsed.data.reservationId),
+  ];
+
+  for (const resId of orderedResIds) {
+    const avail = availableDownpaymentMap.get(resId) ?? 0;
+    const maxForGroup = groupReleasedValueMap.get(resId) ?? 0;
+    const maxApplicable = Math.min(avail, maxForGroup);
+    const toApply = Math.min(remainingDownpaymentToApply, maxApplicable);
+    downpaymentByResId.set(resId, Math.round(toApply * 100) / 100);
+    remainingDownpaymentToApply = Math.max(0, remainingDownpaymentToApply - toApply);
+  }
+
+  if (remainingDownpaymentToApply > 0) {
+    return {
+      status: "error",
+      message:
+        "The entered downpayment exceeds the available downpayment or the value of the selected items.",
+    };
+  }
+
+  const results: Array<{ shipmentId: string; shipmentNo: string; itemCount: number; totalQuantity: number }> = [];
+
+  for (const resId of orderedResIds) {
+    const groupItems = groupsByResId.get(resId) ?? [];
+    const downpaymentForGroup = downpaymentByResId.get(resId) ?? 0;
+
+    const { data, error } = await supabase.rpc("release_reservation_items", {
+      p_reservation_id: resId,
+      p_items: groupItems.map((item) => ({
+        reservation_item_id: item.reservationItemId,
+        quantity: item.quantity,
+      })),
+      p_release_date: formattedDate,
+      p_downpayment_applied: downpaymentForGroup,
+      p_notes: parsed.data.notes ?? null,
+    });
+
+    let releaseResult: {
+      shipmentId: string;
+      shipmentNo: string;
+      itemCount: number;
+      totalQuantity: number;
+    } | null = data;
+
+    if (error || !releaseResult) {
+      // If the 3-arg prepare_reservation_shipment or release_reservation_items does not exist in the remote database,
+      // fall back gracefully to the established prepare_reservation_shipment(uuid, jsonb) and confirm_reservation_shipment
+      if (error?.message?.includes("prepare_reservation_shipment") || error?.message?.includes("release_reservation_items")) {
+        console.warn("release_reservation_items failed with missing function; executing standard release workflow...");
+        const releaseItemsPayload = groupItems.map((item) => ({
+          reservation_item_id: item.reservationItemId,
+          quantity: item.quantity,
+        }));
+        // Prefer the downpayment-aware overload so both the shipment and item
+        // allocations are persisted by the database function.
+        let { data: prepData, error: prepError } = await supabase.rpc("prepare_reservation_shipment", {
+          p_reservation_id: resId,
+          p_items: releaseItemsPayload,
+          p_downpayment_applied: downpaymentForGroup,
+        });
+
+        let usedLegacyPrepare = false;
+        const prepareErrorText = prepError?.message.toLowerCase() ?? "";
+        const downpaymentAwarePrepareMissing =
+          prepareErrorText.includes("prepare_reservation_shipment") &&
+          (prepareErrorText.includes("schema cache") ||
+            prepareErrorText.includes("could not find") ||
+            prepareErrorText.includes("does not exist") ||
+            prepareErrorText.includes("no function"));
+
+        if (downpaymentAwarePrepareMissing) {
+          usedLegacyPrepare = true;
+          const legacyPrepare = await supabase.rpc("prepare_reservation_shipment", {
+            p_reservation_id: resId,
+            p_items: releaseItemsPayload,
+          });
+          prepData = legacyPrepare.data;
+          prepError = legacyPrepare.error;
+        }
+
+        if (prepError || !prepData) {
+          console.error("Fallback prepare_reservation_shipment failed for " + resId, prepError);
+          return {
+            status: "error",
+            message: shipmentErrorMessage(prepError?.message ?? ""),
+          };
+        }
+
+        if (usedLegacyPrepare && downpaymentForGroup > 0) {
+          const { data: updatedShipment, error: downpaymentUpdateError } =
+            await supabase
+              .from("reservation_shipments")
+              .update({ downpayment_applied: downpaymentForGroup })
+              .eq("id", prepData.shipmentId)
+              .select("id")
+              .maybeSingle();
+
+          if (downpaymentUpdateError || !updatedShipment) {
+            console.error(
+              "Fallback shipment downpayment update failed for " + resId,
+              downpaymentUpdateError?.code ?? "no-row-updated",
+            );
+            return {
+              status: "error",
+              message: "The release was prepared, but its downpayment could not be saved. Please retry or cancel the pending release.",
+            };
+          }
+        }
+
+        // 2. Confirm the prepared shipment
+        const { data: confirmData, error: confirmError } = await supabase.rpc("confirm_reservation_shipment", {
+          p_shipment_id: prepData.shipmentId,
+        });
+
+        if (confirmError || !confirmData) {
+          console.error("Fallback confirm_reservation_shipment failed for " + resId, confirmError);
+          return {
+            status: "error",
+            message: shipmentErrorMessage(confirmError?.message ?? ""),
+          };
+        }
+
+        // 3. Persist the custom release date and notes after confirmation.
+        const { data: updatedShipment, error: shipmentUpdateError } = await supabase
+          .from("reservation_shipments")
+          .update({
+            shipped_at: formattedDate,
+            notes: parsed.data.notes ?? null,
+          })
+          .eq("id", prepData.shipmentId)
+          .select("id")
+          .maybeSingle();
+
+        if (shipmentUpdateError || !updatedShipment) {
+          console.error(
+            "Fallback shipment update failed for " + resId,
+            shipmentUpdateError?.code ?? "no-row-updated",
+          );
+          return {
+            status: "error",
+            message: "The release was confirmed, but its release details could not be updated.",
+          };
+        }
+
+        releaseResult = {
+          shipmentId: prepData.shipmentId,
+          shipmentNo: prepData.shipmentNo,
+          itemCount: prepData.itemCount,
+          totalQuantity: prepData.totalQuantity,
+        };
+      } else {
+        console.error("Item release failed for reservation " + resId, error);
+        const friendlyMsg = shipmentErrorMessage(error?.message ?? "");
+        return {
+          status: "error",
+          message:
+            friendlyMsg !== "Unable to complete the shipment action. Please try again."
+              ? friendlyMsg
+              : (error?.message ? `Unable to release items: ${error.message}` : "Unable to complete the shipment action. Please try again."),
+        };
+      }
+    }
+
+    if (!releaseResult) {
+      return {
+        status: "error",
+        message: "Unable to complete item release.",
+      };
+    }
+
+    results.push({
+      shipmentId: releaseResult.shipmentId,
+      shipmentNo: releaseResult.shipmentNo,
+      itemCount: releaseResult.itemCount,
+      totalQuantity: releaseResult.totalQuantity,
+    });
+
+    // Determine if all items in this reservation have been shipped
+    const { data: allItemsInRes } = await supabase
+      .from("reservation_items")
+      .select("id, quantity")
+      .eq("reservation_id", resId);
+
+    const resItemIds = (allItemsInRes ?? []).map((i) => i.id);
+    let allShipped = false;
+
+    if (resItemIds.length > 0) {
+      // Find all shipped quantities for items in this reservation
+      const { data: resShipments } = await supabase
+        .from("reservation_shipments")
+        .select("id")
+        .eq("reservation_id", resId)
+        .eq("status", "shipped");
+
+      const shippedShipmentIds = (resShipments ?? []).map((s) => s.id);
+      const shippedMap = new Map<string, number>();
+
+      if (shippedShipmentIds.length > 0) {
+        const { data: shippedItems } = await supabase
+          .from("reservation_shipment_items")
+          .select("reservation_item_id, quantity")
+          .in("shipment_id", shippedShipmentIds);
+
+        for (const si of shippedItems ?? []) {
+          shippedMap.set(
+            si.reservation_item_id,
+            (shippedMap.get(si.reservation_item_id) ?? 0) + Number(si.quantity),
+          );
+        }
+      }
+
+      allShipped = (allItemsInRes ?? []).every((item) => {
+        const shipped = shippedMap.get(item.id) ?? 0;
+        return shipped >= Number(item.quantity);
+      });
+    }
+
+    // If all items are now shipped, mark status as 'delivered' and record delivered_at
+    if (allShipped) {
+      await supabase
+        .from("reservations")
+        .update({
+          delivered_at: formattedDate,
+          status: "delivered",
+        })
+        .eq("id", resId);
+    }
+
+    revalidateReservation(resId);
+    await logActivity(supabase, {
+      action: "item_release_confirmed",
+      entityType: "reservation",
+      entityId: resId,
+      description: "Released items under shipment " + releaseResult.shipmentNo + ".",
+      metadata: {
+        shipment_id: releaseResult.shipmentId,
+        shipment_no: releaseResult.shipmentNo,
+        item_count: releaseResult.itemCount,
+        total_quantity: releaseResult.totalQuantity,
+        downpayment_applied: downpaymentForGroup,
+        release_date: formattedDate,
+        notes: parsed.data.notes ?? null,
+      },
+    });
+  }
+
+  // Revalidate initial reservation as well in case it wasn't in orderedResIds
   revalidateReservation(parsed.data.reservationId);
-  await logActivity(supabase, {
-    action: "item_release_confirmed",
-    entityType: "reservation",
-    entityId: parsed.data.reservationId,
-    description: "Released items under shipment " + data.shipmentNo + ".",
-    metadata: {
-      shipment_id: data.shipmentId,
-      shipment_no: data.shipmentNo,
-      item_count: data.itemCount,
-      total_quantity: data.totalQuantity,
-      downpayment_applied: appliedDownpayment,
-      release_date: formattedDate,
-      notes: parsed.data.notes ?? null,
-    },
-  });
+
+  const totalItems = results.reduce((sum, r) => sum + r.itemCount, 0);
+  const totalQty = results.reduce((sum, r) => sum + r.totalQuantity, 0);
+  const shipmentNos = results.map((r) => r.shipmentNo).join(", ");
 
   return {
     status: "success",
-    message: "Release " + data.shipmentNo + " successfully processed.",
-    shipmentId: data.shipmentId,
-    shipmentNo: data.shipmentNo,
-    itemCount: data.itemCount,
-    totalQuantity: data.totalQuantity,
+    message: "Release " + shipmentNos + " successfully processed.",
+    shipmentId: results[0]?.shipmentId,
+    shipmentNo: shipmentNos,
+    itemCount: totalItems,
+    totalQuantity: totalQty,
   };
 }
 

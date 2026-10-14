@@ -14,12 +14,12 @@ export const dynamic = "force-dynamic";
 const shipmentIdSchema = z.string().uuid();
 const SHIPMENT_STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
-  shipped: "Shipped",
+  shipped: "Delivered",
   cancelled: "Cancelled",
 };
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ shipmentId: string }> },
 ) {
   const authorization = await authorizeRoles(["admin", "staff", "viewer"]);
@@ -159,18 +159,22 @@ export async function GET(
     }),
   );
 
+  const inline = request.nextUrl.searchParams.get("view") === "inline";
   await logActivity(supabase, {
-    action: "shipment_pdf_downloaded",
+    action: inline ? "invoice_viewed" : "shipment_pdf_downloaded",
     entityType: "reservation",
     entityId: reservation.id,
-    description: "Downloaded shipment PDF " + shipment.shipment_no + ".",
+    description: inline
+      ? "Viewed delivery invoice " + shipment.shipment_no + "."
+      : "Downloaded delivery invoice PDF " + shipment.shipment_no + ".",
   });
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Cache-Control": "private, no-store",
       "Content-Disposition":
-        'attachment; filename="' + shipment.shipment_no + '.pdf"',
+        (inline ? "inline" : "attachment") +
+        '; filename="' + shipment.shipment_no + '.pdf"',
       "Content-Type": "application/pdf",
     },
   });

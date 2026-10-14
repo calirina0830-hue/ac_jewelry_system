@@ -141,6 +141,40 @@ test("invoice page fetches releases and shows only remaining items", async () =>
   }
 });
 
+test("transaction lists, invoices, and release flows keep reservations separate", async () => {
+  const [page, documentData, actions, listPage] = await Promise.all([
+    readFile(
+      new URL("../app/(dashboard)/reservations/[id]/invoice/page.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../lib/reservations/invoice-data.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../actions/shipments.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.equal(page.includes('eq("reservation_id", reservation.id)'), true);
+  assert.equal(page.includes("siblingReservationIds"), false);
+  assert.equal(documentData.includes('eq("reservation_id", reservation.id)'), true);
+  assert.equal(documentData.includes("siblingReservationIds"), false);
+  assert.equal(
+    actions.includes(
+      "itemRows.some((item) => item.reservation_id !== parsed.data.reservationId)",
+    ),
+    true,
+  );
+  assert.equal(
+    listPage.includes("const normalizedKey = reservation.id"),
+    true,
+  );
+  assert.equal(listPage.includes("normalizeCustomerName"), false);
+});
+
 test("invoice PDF data reflects releases and remaining balance", async () => {
   const [document, data] = await Promise.all([
     readFile(

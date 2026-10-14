@@ -451,6 +451,7 @@ export function buildInvoiceDocDefinition(
 export function buildShipmentDocDefinition(
   input: ShipmentDocumentInput,
 ): PdfDocumentDefinition {
+  const isDeliveredInvoice = input.shipmentStatus === "Delivered";
   const hasSubtotals = input.items.some((item) => item.subtotal !== undefined);
   const itemBody: PdfContent[][] = [
     [
@@ -485,7 +486,10 @@ export function buildShipmentDocDefinition(
   });
 
   const content: PdfContent[] = [
-    headerColumns(input.business, "SHIPPING RECORD"),
+    headerColumns(
+      input.business,
+      isDeliveredInvoice ? "DELIVERY INVOICE" : "SHIPPING RECORD",
+    ),
     {
       canvas: [
         { type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.5, lineColor: GOLD },
@@ -497,11 +501,14 @@ export function buildShipmentDocDefinition(
         {
           width: "*",
           stack: [
-            metaRow("Shipment No", input.shipmentNo),
+            metaRow(
+              isDeliveredInvoice ? "Delivery No" : "Shipment No",
+              input.shipmentNo,
+            ),
             metaRow("Reservation No", input.reservationNo),
             metaRow("Status", input.shipmentStatus),
             metaRow(
-              "Shipment Date",
+              isDeliveredInvoice ? "Delivered At" : "Shipment Date",
               input.shippedAt
                 ? formatManilaDateTime(input.shippedAt)
                 : formatManilaDate(input.shipmentDate),
@@ -617,7 +624,9 @@ export function buildShipmentDocDefinition(
     totalsStack.push({
       columns: [
         {
-          text: "BALANCE ON RELEASED GOODS",
+          text: isDeliveredInvoice
+            ? "BALANCE ON DELIVERED ITEMS"
+            : "BALANCE ON RELEASED GOODS",
           bold: true,
           fontSize: 9,
           color: GOLD,

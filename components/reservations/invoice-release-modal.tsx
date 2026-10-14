@@ -24,7 +24,9 @@ export type InvoiceReleaseHistoryItem = {
   status: "pending" | "shipped" | "cancelled";
   createdAt: string;
   shippedAt: string | null;
+  releasedSubtotal: number;
   downpaymentApplied: number;
+  remainingBalance: number;
   notes: string | null;
   items: Array<{
     description: string;
@@ -149,18 +151,12 @@ export function InvoiceReleaseModal({
       return;
     }
     if (numericDownpayment < 0) {
-      setErrorMsg("Downpayment deduction cannot be negative.");
-      return;
-    }
-    if (numericDownpayment > availableDownpayment) {
-      setErrorMsg(
-        `Downpayment deduction (₱${numericDownpayment.toLocaleString()}) cannot exceed the available downpayment balance (₱${availableDownpayment.toLocaleString()}).`,
-      );
+      setErrorMsg("Downpayment cannot be negative.");
       return;
     }
     if (numericDownpayment > totalSelectedValue) {
       setErrorMsg(
-        `Downpayment deduction cannot exceed the total value of the released items (${formatCurrency(totalSelectedValue)}).`,
+        `Downpayment cannot exceed the total value of the released items (${formatCurrency(totalSelectedValue)}).`,
       );
       return;
     }
@@ -318,7 +314,7 @@ export function InvoiceReleaseModal({
                         htmlFor={downpaymentInputId}
                         className="block text-xs font-bold uppercase tracking-wider text-ink"
                       >
-                        Downpayment Deduction
+                        Downpayment
                       </label>
                       <div className="relative mt-1">
                         <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-sm text-muted">
@@ -329,18 +325,11 @@ export function InvoiceReleaseModal({
                           type="number"
                           step="0.01"
                           min="0"
-                          max={availableDownpayment}
                           value={downpaymentDeduction}
                           onChange={(e) => setDownpaymentDeduction(e.target.value)}
                           className="block w-full rounded-lg border border-border bg-white pl-8 pr-3 py-2 text-sm text-ink focus:border-gold focus:outline-none"
                         />
                       </div>
-                      <p className="mt-1 text-[11px] text-muted">
-                        Available downpayment:{" "}
-                        <strong className="text-ink">
-                          {formatCurrency(availableDownpayment)}
-                        </strong>
-                      </p>
                     </div>
                   </div>
 
@@ -456,7 +445,7 @@ export function InvoiceReleaseModal({
                       <span className="font-semibold">{formatCurrency(totalSelectedValue)}</span>
                     </div>
                     <div className="flex justify-between text-ink">
-                      <span>Downpayment Deducted:</span>
+                      <span>Downpayment:</span>
                       <span className="font-semibold text-emerald-700">
                         -{formatCurrency(numericDownpayment)}
                       </span>
@@ -571,14 +560,6 @@ export function InvoiceReleaseModal({
                               day: "numeric",
                             })}
                       </div>
-                      {record.downpaymentApplied > 0 && (
-                        <div>
-                          <strong>Downpayment Deducted:</strong>{" "}
-                          <span className="text-emerald-700 font-medium">
-                            {formatCurrency(record.downpaymentApplied)}
-                          </span>
-                        </div>
-                      )}
                       {record.notes && (
                         <div>
                           <strong>Notes:</strong> {record.notes}
@@ -598,6 +579,26 @@ export function InvoiceReleaseModal({
                         ))}
                       </ul>
                     </div>
+                    <dl className="rounded-lg border border-border bg-white p-3 text-xs">
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-muted">Released item total</dt>
+                        <dd className="font-medium text-ink">
+                          {formatCurrency(record.releasedSubtotal)}
+                        </dd>
+                      </div>
+                      <div className="mt-1 flex justify-between gap-3">
+                        <dt className="text-muted">Downpayment applied</dt>
+                        <dd className="font-medium text-emerald-700">
+                          {formatCurrency(record.downpaymentApplied)}
+                        </dd>
+                      </div>
+                      <div className="mt-2 flex justify-between gap-3 border-t border-border pt-2">
+                        <dt className="font-semibold text-ink">Remaining balance</dt>
+                        <dd className="font-bold text-ink">
+                          {formatCurrency(record.remainingBalance)}
+                        </dd>
+                      </div>
+                    </dl>
                   </div>
                 ))
               )}

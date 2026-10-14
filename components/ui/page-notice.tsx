@@ -3,6 +3,8 @@ const MESSAGES: Record<string, string> = {
   updated: "Changes saved successfully.",
   archived: "Record archived successfully.",
   restored: "Record restored successfully.",
+  deleted: "Archived reservation permanently deleted.",
+  "all-deleted": "All archived reservations were permanently deleted.",
   "status-paid": "Reservation marked as paid.",
   "status-delivered": "Reservation marked as delivered.",
   "status-cancelled": "Reservation cancelled and its stock commitment released.",
@@ -12,6 +14,7 @@ const ERRORS: Record<string, string> = {
   "not-authorized": "You do not have permission to perform that action.",
   "archive-failed": "The record could not be archived. Please try again.",
   "restore-failed": "The record could not be restored. Please try again.",
+  "delete-failed": "The archived record could not be deleted. Please try again.",
   "restore-stock-failed":
     "The reservation cannot be restored because one or more items are unavailable.",
   "not-editable": "Only active reserved reservations can be edited.",

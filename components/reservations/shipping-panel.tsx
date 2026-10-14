@@ -442,7 +442,7 @@ export function ShippingPanel({
                       </span>
                       {shipment.downpaymentApplied > 0 && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-800">
-                          Downpayment applied to this release
+                          Downpayment applied: {formatCurrency(shipment.downpaymentApplied)}
                         </span>
                       )}
                     </div>

@@ -144,7 +144,7 @@ export async function createReservation(
 
   const supabase = await createClient();
   const { data: reservationId, error } = await supabase.rpc(
-    "create_reservation",
+    "create_reservation_with_downpayment",
     {
       p_customer_id: parsed.data.customerId,
       p_discount: centsToDecimal(parsed.data.reservationDiscount),
@@ -492,6 +492,61 @@ export async function restoreReservation(id: string): Promise<void> {
   });
   revalidateReservationPaths(parsedId.data);
   redirect("/reservations?status=all&archive=active&message=restored");
+}
+
+export async function deleteArchivedReservation(id: string): Promise<void> {
+  const authorization = await authorizeRoles(["admin"]);
+  const parsedId = reservationIdSchema.safeParse(id);
+
+  if (!authorization || !parsedId.success) {
+    redirect("/reservations?error=not-authorized");
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_archived_reservation", {
+    p_reservation_id: parsedId.data,
+  });
+
+  if (error) {
+    console.error("Delete archived reservation failed", error.code, error.message);
+    redirect("/reservations?status=all&archive=archived&error=delete-failed");
+  }
+
+  await logActivity(supabase, {
+    action: "reservation_deleted",
+    entityType: "reservation",
+    entityId: parsedId.data,
+    description: "Permanently deleted archived reservation.",
+  });
+  revalidatePath("/reservations");
+  revalidatePath("/dashboard");
+  redirect("/reservations?status=all&archive=archived&message=deleted");
+}
+
+export async function deleteAllArchivedReservations(): Promise<void> {
+  const authorization = await authorizeRoles(["admin"]);
+
+  if (!authorization) {
+    redirect("/reservations?error=not-authorized");
+  }
+
+  const supabase = await createClient();
+  const { data: count, error } = await supabase.rpc("delete_all_archived_reservations");
+
+  if (error) {
+    console.error("Delete all archived reservations failed", error.code, error.message);
+    redirect("/reservations?status=all&archive=archived&error=delete-failed");
+  }
+
+  await logActivity(supabase, {
+    action: "archived_reservations_purged",
+    entityType: "reservation",
+    description: `Permanently deleted all (${count ?? 0}) archived reservation(s).`,
+    metadata: { count },
+  });
+  revalidatePath("/reservations");
+  revalidatePath("/dashboard");
+  redirect("/reservations?status=all&archive=archived&message=all-deleted");
 }
 
 function getSelectedReservationIds(formData: FormData): string[] | null {

@@ -112,7 +112,9 @@ export function ReservationForm({
   const [reservationDiscount, setReservationDiscount] = useState(
     initialValue?.reservationDiscount ?? "0.00",
   );
-  const downpayment = initialValue?.downpayment ?? "0.00";
+  const [downpayment, setDownpayment] = useState(
+    initialValue?.downpayment ?? "0.00",
+  );
 
   // Modals for inline creation
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -276,7 +278,9 @@ export function ReservationForm({
           </>
         )}
         <input name="items" type="hidden" value={serializedItems} />
-        <input name="downpayment" type="hidden" value={downpayment} />
+        {initialValue ? (
+          <input name="downpayment" type="hidden" value={downpayment} />
+        ) : null}
 
         {state.message && (
           <div
@@ -691,6 +695,19 @@ export function ReservationForm({
               type="number"
               value={reservationDiscount}
             />
+            {!initialValue && (
+              <InputField
+                errors={state.fieldErrors?.downpayment}
+                inputMode="decimal"
+                label="Downpayment"
+                min="0"
+                name="downpayment"
+                onChange={(event) => setDownpayment(event.target.value)}
+                step="0.01"
+                type="number"
+                value={downpayment}
+              />
+            )}
           </div>
           <dl className="mt-6 space-y-3 border-t border-border pt-5 text-sm">
             <SummaryRow label="Subtotal" value={preview.subtotalCents} />
@@ -699,12 +716,10 @@ export function ReservationForm({
               value={parseMoneyToCents(reservationDiscount) ?? 0}
             />
             <SummaryRow label="Total" strong value={preview.totalCents} />
-            {(parseMoneyToCents(downpayment) ?? 0) > 0 && (
-              <SummaryRow
-                label="Previously recorded amount"
-                value={parseMoneyToCents(downpayment) ?? 0}
-              />
-            )}
+            <SummaryRow
+              label="Downpayment"
+              value={parseMoneyToCents(downpayment) ?? 0}
+            />
             <SummaryRow label="Balance" strong value={preview.balanceCents} />
           </dl>
           <p className="mt-4 text-xs leading-5 text-muted">
