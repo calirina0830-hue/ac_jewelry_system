@@ -17,7 +17,10 @@ for sql_file in \
   supabase/migrations/202610170001_release_items_with_date_and_notes.sql \
   supabase/migrations/202610190001_ensure_shipping_and_release_rpcs.sql \
   supabase/migrations/202610200001_relax_reservation_items_category_constraint.sql \
-  supabase/migrations/202610210001_delete_archived_reservations.sql
+  supabase/migrations/202610210001_delete_archived_reservations.sql \
+  supabase/migrations/202610220001_create_reservation_with_downpayment.sql \
+  supabase/migrations/202610230001_reuse_customer_reservation.sql \
+  supabase/migrations/202610240001_edit_reservation_downpayment.sql
 do
   echo "Applying $sql_file..."
   docker run --rm \

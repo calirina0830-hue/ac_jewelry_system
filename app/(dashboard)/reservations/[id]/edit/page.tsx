@@ -44,33 +44,65 @@ export default async function EditReservationPage({
     redirect("/reservations/" + id + "?error=not-editable");
   }
 
-  // Find any sibling active/reserved reservations belonging to the same customer
-  // so all items ordered by the customer appear when editing.
-  let siblingReservationIds: string[] = [reservation.id];
-  let siblingReservations: typeof reservation[] = [];
-  if (reservation.customer_id) {
-    const { data: siblings } = await supabase
-      .from("reservations")
+  const [
+    { data: items },
+    { data: shipments },
+    { data: payments },
+  ] = await Promise.all([
+    supabase
+      .from("reservation_items")
       .select("*")
-      .eq("customer_id", reservation.customer_id)
-      .eq("status", "reserved")
-      .is("archived_at", null)
-      .order("created_at");
-    if (siblings && siblings.length > 0) {
-      siblingReservations = siblings;
-      siblingReservationIds = siblings.map((r) => r.id);
-    }
-  }
-
-  const { data: items } = await supabase
-    .from("reservation_items")
-    .select("*")
-    .in("reservation_id", siblingReservationIds)
-    .order("created_at");
+      .eq("reservation_id", reservation.id)
+      .order("created_at"),
+    supabase
+      .from("reservation_shipments")
+      .select("id, status, downpayment_applied")
+      .eq("reservation_id", reservation.id),
+    supabase
+      .from("reservation_payments")
+      .select("amount, voided_at")
+      .eq("reservation_id", reservation.id),
+  ]);
 
   if (!items) {
     notFound();
   }
+
+  const shipmentStatusById = new Map(
+    (shipments ?? []).map((shipment) => [shipment.id, shipment.status]),
+  );
+  const shipmentIds = (shipments ?? []).map((shipment) => shipment.id);
+  const { data: shipmentItems } = shipmentIds.length
+    ? await supabase
+        .from("reservation_shipment_items")
+        .select("shipment_id, reservation_item_id, quantity")
+        .in("shipment_id", shipmentIds)
+    : { data: [] };
+  const releasedByItem = new Map<string, number>();
+  for (const shipmentItem of shipmentItems ?? []) {
+    if (shipmentStatusById.get(shipmentItem.shipment_id) !== "shipped") continue;
+    releasedByItem.set(
+      shipmentItem.reservation_item_id,
+      (releasedByItem.get(shipmentItem.reservation_item_id) ?? 0) +
+        Number(shipmentItem.quantity),
+    );
+  }
+
+  const usedDownpayment = (shipments ?? [])
+    .filter((shipment) => shipment.status === "shipped")
+    .reduce(
+      (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
+      0,
+    );
+  const reservedDownpayment = (shipments ?? [])
+    .filter((shipment) => shipment.status === "pending")
+    .reduce(
+      (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
+      0,
+    );
+  const activePaymentTotal = (payments ?? [])
+    .filter((payment) => !payment.voided_at)
+    .reduce((total, payment) => total + Number(payment.amount), 0);
 
   const options = await getReservationFormOptions({
     excludeReservationId: reservation.id,
@@ -111,12 +143,36 @@ export default async function EditReservationPage({
     };
   });
 
-  const combinedDiscount = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.discount), 0)
-    : Number(reservation.discount);
-  const combinedDownpayment = siblingReservations.length > 0
-    ? siblingReservations.reduce((sum, r) => sum + Number(r.downpayment), 0)
+  const combinedDiscount = Number(reservation.discount);
+  const combinedDownpayment = payments?.length
+    ? activePaymentTotal
     : Number(reservation.downpayment);
+
+  const toInitialItem = (
+    item: (typeof itemsWithCategory)[number],
+  ): ReservationInitialValue["items"][number] => ({
+    reservationItemId: item.id,
+    stockItemId: item.stock_item_id,
+    quantity: item.quantity,
+    discount: Number(item.discount).toFixed(2),
+    unitPrice: item.price_confirmed
+      ? Number(item.unit_price).toFixed(2)
+      : "",
+    priceConfirmed: item.price_confirmed,
+    itemName: item.item_name,
+    sku: item.sku,
+    category: item.category ?? "",
+    imagePath: item.image_path,
+    orderedAt: item.ordered_at ?? item.created_at,
+  });
+  const editableItems = itemsWithCategory.filter(
+    (item) =>
+      Number(item.quantity) - (releasedByItem.get(item.id) ?? 0) > 0,
+  );
+  const fullyReleasedItems = itemsWithCategory.filter(
+    (item) =>
+      Number(item.quantity) - (releasedByItem.get(item.id) ?? 0) <= 0,
+  );
 
   const initialValue: ReservationInitialValue = {
     id: reservation.id,
@@ -125,22 +181,11 @@ export default async function EditReservationPage({
     customerId: reservation.customer_id,
     reservationDiscount: combinedDiscount.toFixed(2),
     downpayment: combinedDownpayment.toFixed(2),
+    usedDownpayment: usedDownpayment.toFixed(2),
+    reservedDownpayment: reservedDownpayment.toFixed(2),
     notes: reservation.notes ?? "",
-    items: itemsWithCategory.map((item) => ({
-      reservationItemId: item.id,
-      stockItemId: item.stock_item_id,
-      quantity: item.quantity,
-      discount: Number(item.discount).toFixed(2),
-      unitPrice: item.price_confirmed
-        ? Number(item.unit_price).toFixed(2)
-        : "",
-      priceConfirmed: item.price_confirmed,
-      itemName: item.item_name,
-      sku: item.sku,
-      category: item.category ?? "",
-      imagePath: item.image_path,
-      orderedAt: item.ordered_at ?? item.created_at,
-    })),
+    items: editableItems.map(toInitialItem),
+    preservedItems: fullyReleasedItems.map(toInitialItem),
   };
 
   return (

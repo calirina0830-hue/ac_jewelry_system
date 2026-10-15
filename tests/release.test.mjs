@@ -141,7 +141,7 @@ test("invoice page fetches releases and shows only remaining items", async () =>
   }
 });
 
-test("transaction lists, invoices, and release flows keep reservations separate", async () => {
+test("only Reserved and Paid lists compile customers; release flows stay separate", async () => {
   const [page, documentData, actions, listPage] = await Promise.all([
     readFile(
       new URL("../app/(dashboard)/reservations/[id]/invoice/page.tsx", import.meta.url),
@@ -169,10 +169,42 @@ test("transaction lists, invoices, and release flows keep reservations separate"
     true,
   );
   assert.equal(
-    listPage.includes("const normalizedKey = reservation.id"),
+    listPage.includes('filters.status === "reserved" || filters.status === "paid"'),
     true,
   );
   assert.equal(listPage.includes("normalizeCustomerName"), false);
+  assert.equal(
+    listPage.includes('"customer:" + reservation.customer_id'),
+    true,
+  );
+});
+
+test("manual additions reuse one active reservation number per customer", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202610230001_reuse_customer_reservation.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    migration,
+    /status\s*=\s*'reserved'[\s\S]*archived_at\s+is\s+null/i,
+  );
+  assert.match(migration, /pg_advisory_xact_lock/i);
+  assert.match(
+    migration,
+    /update\s+public\.reservation_items\s+set\s+reservation_id\s*=\s*v_existing_id/i,
+  );
+  assert.match(
+    migration,
+    /subtotal\s*=\s*existing\.subtotal\s*\+\s*v_created\.subtotal/i,
+  );
+  assert.match(
+    migration,
+    /insert\s+into\s+public\.reservation_payments/i,
+  );
 });
 
 test("invoice PDF data reflects releases and remaining balance", async () => {
@@ -257,6 +289,90 @@ test("reservation detail page displays release quantities and downpayment", asyn
       "detail page must not show release amounts: " + removed,
     );
   }
+});
+
+test("reservation details show item downpayment allocations and their breakdown", async () => {
+  const page = await readFile(
+    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  for (const fragment of [
+    "allocateDownpaymentByLineTotal",
+    ">Downpayment</th>",
+    "Downpayment details",
+    "Total recorded",
+    "Applied to releases",
+    "Open release hold",
+    "Available downpayment",
+  ]) {
+    assert.equal(page.includes(fragment), true, fragment);
+  }
+});
+
+test("reservation edit hides fully released items and shows downpayment details", async () => {
+  const [page, form, types] = await Promise.all([
+    readFile(
+      new URL("../app/(dashboard)/reservations/[id]/edit/page.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../components/reservations/reservation-form.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../types/reservations.ts", import.meta.url), "utf8"),
+  ]);
+
+  for (const fragment of [
+    "reservation_shipment_items",
+    'shipment.status === "shipped"',
+    "releasedByItem",
+    "fullyReleasedItems",
+    "preservedItems: fullyReleasedItems.map(toInitialItem)",
+  ]) {
+    assert.equal(page.includes(fragment), true, "edit page: " + fragment);
+  }
+  for (const fragment of [
+    "fully released item",
+    "allocateCentsByLineTotal",
+    ">Downpayment</p>",
+    'label="Applied to releases"',
+    'label="Open release hold"',
+    'label="Available downpayment"',
+  ]) {
+    assert.equal(form.includes(fragment), true, "form: " + fragment);
+  }
+  assert.match(types, /preservedItems\?: ReservationInitialItem\[\]/);
+});
+
+test("reservation edits can adjust downpayment while preserving the payment ledger", async () => {
+  const [form, actions, migration, errors] = await Promise.all([
+    readFile(
+      new URL("../components/reservations/reservation-form.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../actions/reservations.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../supabase/migrations/202610240001_edit_reservation_downpayment.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../lib/reservations/errors.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.equal(form.includes('name="downpayment"'), true);
+  assert.equal(form.includes("Changing this amount creates an adjustment"), true);
+  assert.equal(
+    actions.includes('"update_reservation_with_payment_adjustment"'),
+    true,
+  );
+  assert.match(migration, /public\.update_reservation\s*\(/i);
+  assert.match(migration, /v_adjustment\s*:=\s*p_downpayment\s*-\s*v_ledger_total/i);
+  assert.match(migration, /insert into public\.reservation_payments/i);
+  assert.match(migration, /downpayment_below_committed/i);
+  assert.match(errors, /downpayment_below_committed/);
 });
 
 test("release panel shows an invoice preview restricted to released items", async () => {

@@ -34,6 +34,9 @@ export type ReservationInitialValue = {
   customerId: string;
   reservationDiscount: string;
   downpayment: string;
+  usedDownpayment?: string;
+  reservedDownpayment?: string;
   notes: string;
   items: ReservationInitialItem[];
+  preservedItems?: ReservationInitialItem[];
 };

@@ -200,7 +200,7 @@ export async function updateReservation(
 
   const supabase = await createClient();
   const { data: reservationId, error } = await supabase.rpc(
-    "update_reservation",
+    "update_reservation_with_payment_adjustment",
     {
       p_reservation_id: parsed.data.id,
       p_expected_updated_at: parsed.data.updatedAt,

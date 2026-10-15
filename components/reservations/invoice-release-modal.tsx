@@ -265,6 +265,14 @@ export function InvoiceReleaseModal({
                   </div>
                   <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                     <a
+                      href={`/shipments/${lastRelease.shipmentId}/pdf?view=inline`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-10 items-center rounded-lg border border-emerald-700 bg-white px-4 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100"
+                    >
+                      View invoice
+                    </a>
+                    <a
                       href={`/shipments/${lastRelease.shipmentId}/pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -536,14 +544,24 @@ export function InvoiceReleaseModal({
                           {record.status}
                         </span>
                       </div>
-                      <a
-                        href={`/shipments/${record.id}/pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex h-8 items-center rounded-lg border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:border-gold hover:bg-canvas"
-                      >
-                        Download PDF
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`/shipments/${record.id}/pdf?view=inline`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-8 items-center rounded-lg border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:border-gold hover:bg-canvas"
+                        >
+                          View invoice
+                        </a>
+                        <a
+                          href={`/shipments/${record.id}/pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-8 items-center rounded-lg border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:border-gold hover:bg-canvas"
+                        >
+                          Download PDF
+                        </a>
+                      </div>
                     </div>
                     <div className="text-xs text-muted space-y-1">
                       <div>

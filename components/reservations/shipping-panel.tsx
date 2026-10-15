@@ -660,12 +660,22 @@ export function ShippingPanel({
                     Done
                   </button>
                   {lastRelease.shipmentId && (
-                    <a
-                      href={`/shipments/${lastRelease.shipmentId}/pdf`}
-                      className="inline-flex items-center justify-center rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-muted-foreground"
-                    >
-                      Open release PDF
-                    </a>
+                    <>
+                      <a
+                        href={`/shipments/${lastRelease.shipmentId}/pdf?view=inline`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center rounded-full border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted/40"
+                      >
+                        View invoice
+                      </a>
+                      <a
+                        href={`/shipments/${lastRelease.shipmentId}/pdf`}
+                        className="inline-flex items-center justify-center rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition hover:bg-muted-foreground"
+                      >
+                        Download release invoice
+                      </a>
+                    </>
                   )}
                 </div>
               </div>

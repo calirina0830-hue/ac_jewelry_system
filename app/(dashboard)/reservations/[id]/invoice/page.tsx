@@ -223,8 +223,8 @@ export default async function ReservationInvoicePage({
   });
 
   return (
-    <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8" data-print-page>
-      <div className="mb-5 space-y-3" data-print-hide>
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8 lg:py-12" data-print-page>
+      <div className="mb-6 space-y-3" data-print-hide>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link
             className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold"
@@ -259,59 +259,62 @@ export default async function ReservationInvoicePage({
         </div>
       </div>
 
-      <article className="border border-border bg-white shadow-card" data-print-root>
+      <article
+        className="overflow-hidden rounded-2xl border border-border bg-white shadow-card"
+        data-print-root
+      >
         <div className="h-1 bg-gold" data-print-band />
         <header
-          className="flex flex-col gap-6 border-b-2 border-gold px-6 py-6 sm:flex-row sm:items-start sm:justify-between sm:px-9"
+          className="flex flex-col gap-8 border-b border-border px-7 py-8 sm:flex-row sm:items-start sm:justify-between sm:px-10 sm:py-9"
           data-print-inset
         >
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-gold-dark">
+            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-gold-dark">
               {BUSINESS.descriptor}
             </p>
-            <h1 className="mt-1.5 font-serif text-3xl leading-tight text-ink">
+            <h1 className="mt-2 font-serif text-3xl leading-tight text-ink sm:text-4xl">
               {BUSINESS.name}
             </h1>
-            <p className="mt-1.5 text-[10px] uppercase tracking-[0.22em] text-muted">
+            <p className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">
               {BUSINESS.systemLabel}
             </p>
           </div>
-          <div className="shrink-0 sm:text-right">
-            <p className="font-serif text-3xl uppercase tracking-[0.14em] text-gold-dark">
+          <div className="shrink-0 rounded-xl border border-border bg-canvas/60 p-4 sm:min-w-[275px]">
+            <p className="font-serif text-3xl uppercase tracking-[0.12em] text-gold-dark sm:text-right">
               Invoice
             </p>
-            <div className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between gap-8 sm:justify-end">
-                <span className="uppercase tracking-[0.12em] text-muted">
+            <div className="mt-4 space-y-2.5 text-xs">
+              <div className="flex justify-between gap-6 sm:justify-end">
+                <span className="uppercase tracking-[0.1em] text-muted">
                   Invoice No
                 </span>
-                <span className="font-semibold text-ink">
+                <span className="font-bold tabular-nums text-ink">
                   {reservation.reservation_no}
                 </span>
               </div>
-              <div className="flex justify-between gap-8 sm:justify-end">
-                <span className="uppercase tracking-[0.12em] text-muted">
+              <div className="flex justify-between gap-6 sm:justify-end">
+                <span className="uppercase tracking-[0.1em] text-muted">
                   Date
                 </span>
                 <span className="font-semibold text-ink">
                   {formatDate(reservation.reserved_at)}
                 </span>
               </div>
-              <div className="flex justify-between gap-8 sm:justify-end">
-                <span className="uppercase tracking-[0.12em] text-muted">
+              <div className="flex justify-between gap-6 sm:justify-end">
+                <span className="uppercase tracking-[0.1em] text-muted">
                   Reservation
                 </span>
-                <span className="inline-flex rounded-full border border-gold bg-gold-soft px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gold-dark">
+                <span className="inline-flex rounded-full border border-gold/40 bg-gold-soft px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-gold-dark">
                   {statusLabel}
                 </span>
               </div>
-              <div className="flex justify-between gap-8 sm:justify-end">
-                <span className="uppercase tracking-[0.12em] text-muted">
+              <div className="flex justify-between gap-6 sm:justify-end">
+                <span className="uppercase tracking-[0.1em] text-muted">
                   Delivery
                 </span>
                 <span
                   className={
-                    "inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide " +
+                    "inline-flex rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide " +
                     (reservation.delivered_at
                       ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                       : "border-border bg-canvas text-muted")
@@ -325,18 +328,18 @@ export default async function ReservationInvoicePage({
         </header>
 
         <section
-          className="grid gap-6 border-b border-border px-6 py-5 sm:grid-cols-2 sm:px-9"
+          className="grid gap-5 border-b border-border px-7 py-6 sm:grid-cols-2 sm:px-10 sm:py-7"
           data-print-inset
         >
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+          <div className="rounded-xl border border-border/80 bg-white p-4 sm:p-5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold-dark">
               Order For
             </p>
-            <p className="mt-1.5 text-base font-bold text-ink">
+            <p className="mt-2 text-lg font-bold text-ink">
               {customer?.name ?? "Not provided"}
             </p>
             {customerDetails.length > 0 && (
-              <dl className="mt-2 space-y-1 text-xs">
+              <dl className="mt-3 space-y-1.5 text-sm leading-5">
                 {customerDetails.map((detail) => (
                   <div key={detail.label} className="flex flex-wrap gap-1.5">
                     <dt className="font-semibold text-muted">
@@ -348,21 +351,21 @@ export default async function ReservationInvoicePage({
               </dl>
             )}
           </div>
-          <div>
-            <div className="border-t border-border pt-3 sm:border-t-0 sm:pt-0 sm:text-left">
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+          <div className="rounded-xl border border-border/80 bg-canvas/40 p-4 sm:p-5">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold-dark">
                 Invoice From
               </p>
-              <p className="mt-1.5 text-base font-bold text-ink">
+              <p className="mt-2 text-lg font-bold text-ink">
                 {BUSINESS.name}
               </p>
-              <p className="text-xs text-muted">{BUSINESS.descriptor}</p>
+              <p className="mt-1 text-sm text-muted">{BUSINESS.descriptor}</p>
             </div>
-            <div className="mt-4 border-t border-border/70 pt-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
-                NOTES:
+            <div className="mt-4 border-t border-border/80 pt-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted">
+                Notes
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink">
+              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-ink">
                 {reservation.notes?.trim() ? (
                   reservation.notes
                 ) : (
@@ -373,16 +376,16 @@ export default async function ReservationInvoicePage({
           </div>
         </section>
 
-        <section className="px-6 pt-5 sm:px-9" data-print-inset>
+        <section className="px-7 pt-6 sm:px-10 sm:pt-7" data-print-inset>
           {releaseLedger.releasedUnits > 0 && (
             <div
-              className="mb-5 rounded-lg border border-gold bg-gold-soft px-4 py-3 text-xs sm:text-sm"
+              className="mb-6 rounded-xl border border-gold/40 bg-gold-soft/70 px-4 py-4 text-sm"
               data-print-band
             >
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold-dark">
                 Already released &amp; billed separately
               </p>
-              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-6 gap-y-1">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
                 <span className="text-ink">
                   {releaseLedger.releasedUnits} unit
                   {releaseLedger.releasedUnits === 1 ? "" : "s"} worth{" "}
@@ -399,40 +402,40 @@ export default async function ReservationInvoicePage({
           )}
           <h2 className="sr-only">Jewelry Items</h2>
           <div className="overflow-x-auto" data-print-unclip>
-            <table className="w-full min-w-[640px] border-collapse text-left">
+            <table className="w-full min-w-[700px] border-collapse text-left">
               <thead>
-                <tr className="border-b-2 border-gold bg-gold-soft text-[10px] uppercase tracking-[0.14em] text-gold-dark">
-                  <th className="px-3 py-2.5 font-bold">
+                <tr className="border-y border-gold/50 bg-gold-soft text-[11px] uppercase tracking-[0.12em] text-gold-dark">
+                  <th className="px-4 py-3 font-bold">
                     Date
                     <span className="sr-only"> (Order Date)</span>
                   </th>
-                  <th className="px-3 py-2.5 font-bold">No.</th>
-                  <th className="px-3 py-2.5 font-bold">Item</th>
-                  <th className="px-3 py-2.5 text-right font-bold">Quantity</th>
-                  <th className="px-3 py-2.5 text-right font-bold">Unit Price</th>
-                  <th className="px-3 py-2.5 text-right font-bold">Amount</th>
+                  <th className="px-4 py-3 font-bold">No.</th>
+                  <th className="px-4 py-3 font-bold">Item</th>
+                  <th className="px-4 py-3 text-right font-bold">Quantity</th>
+                  <th className="px-4 py-3 text-right font-bold">Unit Price</th>
+                  <th className="px-4 py-3 text-right font-bold">Amount</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-border/80 text-[13px]">
                 {displayItems.length === 0 ? (
                   <tr>
                     <td
                       colSpan={6}
-                      className="px-3 py-6 text-center text-sm text-muted"
+                      className="px-4 py-8 text-center text-sm text-muted"
                     >
                       All reserved items have been released.
                     </td>
                   </tr>
                 ) : (
                   displayItems.map((item, index) => (
-                    <tr key={item.id}>
-                      <td className="whitespace-nowrap px-3 py-2.5 align-top text-sm text-muted">
+                    <tr className="even:bg-canvas/35" key={item.id}>
+                      <td className="whitespace-nowrap px-4 py-4 align-top text-xs text-muted">
                         {formatOrderDateTime(item.ordered_at)}
                       </td>
-                      <td className="px-3 py-2.5 align-top text-sm text-muted">
+                      <td className="px-4 py-4 align-top text-sm text-muted">
                         {index + 1}
                       </td>
-                      <td className="break-words px-3 py-2.5 text-sm font-semibold text-ink">
+                      <td className="break-words px-4 py-4 text-sm font-semibold leading-6 text-ink">
                         {item.sku + " - " + item.item_name + " - " + item.category}
                         {item.releasedQty > 0 && (
                           <p className="mt-0.5 text-xs font-normal text-muted">
@@ -441,13 +444,13 @@ export default async function ReservationInvoicePage({
                           </p>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
+                      <td className="px-4 py-4 text-right align-top text-sm tabular-nums">
                         {item.quantity}
                       </td>
-                      <td className="px-3 py-2.5 text-right align-top text-sm tabular-nums">
+                      <td className="px-4 py-4 text-right align-top text-sm tabular-nums">
                         {formatCurrency(item.unit_price)}
                       </td>
-                      <td className="px-3 py-2.5 text-right align-top text-sm font-bold tabular-nums">
+                      <td className="px-4 py-4 text-right align-top text-sm font-bold tabular-nums text-ink">
                         {formatCurrency(item.line_total)}
                       </td>
                     </tr>
@@ -459,54 +462,64 @@ export default async function ReservationInvoicePage({
         </section>
 
         <section
-          className="ml-auto w-full max-w-sm px-6 pb-7 pt-5 sm:px-9"
+          className="ml-auto w-full max-w-md px-7 pb-8 pt-6 sm:px-10 sm:pb-9"
           data-print-inset
           data-print-totals
         >
-          <InvoiceTotal
-            label={
-              releaseLedger.releasedUnits > 0
-                ? "Subtotal (remaining items)"
-                : "Subtotal"
-            }
-            value={releaseLedger.remainingSubtotal}
-          />
-          <InvoiceTotal
-            label="Reservation Discount"
-            value={remainingReservationDiscount}
-          />
-          <div className="flex justify-between gap-6 py-1.5 text-sm text-muted">
-            <span>Total Quantity</span>
-            <span className="whitespace-nowrap tabular-nums">
-              {releaseLedger.remainingUnits}
-            </span>
-          </div>
-          <InvoiceTotal emphasize label="Total" value={remainingTotal} />
-          <InvoiceTotal label="Amount Paid" value={totals.amountPaid} />
-          {downpaymentCommitted > 0 && (
-            <InvoiceTotal
-              label="Applied to released goods"
-              value={-downpaymentCommitted}
-            />
-          )}
           <div
-            className="mt-3 flex items-center justify-between gap-4 border-2 border-gold bg-gold-soft px-4 py-3"
-            data-print-band
+            className="rounded-2xl border border-border bg-canvas/45 p-5 sm:p-6"
+            data-print-summary-card
           >
-            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
-              Balance Due
-            </span>
-            <span className="whitespace-nowrap font-serif text-xl font-bold tabular-nums text-ink">
-              {formatCurrency(balanceDue)}
-            </span>
+            <InvoiceTotal
+              label={
+                releaseLedger.releasedUnits > 0
+                  ? "Subtotal (remaining items)"
+                  : "Subtotal"
+              }
+              value={releaseLedger.remainingSubtotal}
+            />
+            <InvoiceTotal
+              label="Reservation Discount"
+              value={remainingReservationDiscount}
+            />
+            <div className="flex justify-between gap-6 py-1.5 text-sm text-muted">
+              <span>Total Quantity</span>
+              <span className="whitespace-nowrap tabular-nums">
+                {releaseLedger.remainingUnits}
+              </span>
+            </div>
+            <InvoiceTotal emphasize label="Total" value={remainingTotal} />
+            <InvoiceTotal label="Amount Paid" value={totals.amountPaid} />
+            <InvoiceTotal label="Downpayment" value={totals.amountPaid} />
+            {downpaymentCommitted > 0 && (
+              <InvoiceTotal
+                label="Applied downpayment to released items"
+                value={-downpaymentCommitted}
+              />
+            )}
+            <InvoiceTotal
+              label="Remaining Downpayment Balance"
+              value={remainingUnapplied}
+            />
+            <div
+              className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-gold/60 bg-gold-soft px-5 py-4"
+              data-print-band
+            >
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-gold-dark">
+                Balance Due
+              </span>
+              <span className="whitespace-nowrap font-serif text-2xl font-bold tabular-nums text-ink">
+                {formatCurrency(balanceDue)}
+              </span>
+            </div>
           </div>
         </section>
 
         <footer
-          className="border-t border-border px-6 py-4 text-center sm:px-9"
+          className="border-t border-border bg-canvas/35 px-7 py-5 text-center sm:px-10"
           data-print-inset
         >
-          <p className="text-[11px] text-muted">
+          <p className="text-xs text-muted">
             Thank you for your business &middot; {BUSINESS.name} &middot;{" "}
             {BUSINESS.systemLabel}
           </p>
@@ -528,8 +541,10 @@ function InvoiceTotal({
   return (
     <div
       className={
-        "flex justify-between gap-6 py-1.5 text-sm " +
-        (emphasize ? "font-bold text-ink" : "text-muted")
+        "flex items-baseline justify-between gap-6 text-sm " +
+        (emphasize
+          ? "mt-2 border-y border-gold/40 bg-gold-soft/70 px-3 py-3 font-bold text-ink"
+          : "border-b border-border/60 py-2 text-muted")
       }
     >
       <span>{label}</span>

@@ -96,14 +96,13 @@ export default async function ReservationDetailsPage({
   const { data: shipmentItems } = shipmentIds.length
     ? await supabase
         .from("reservation_shipment_items")
-        .select("shipment_id, reservation_item_id, quantity, downpayment_allocated")
+        .select("shipment_id, reservation_item_id, quantity")
         .in("shipment_id", shipmentIds)
     : { data: [] };
   const shipmentStatusById = new Map(
     (shipments ?? []).map((shipment) => [shipment.id, shipment.status]),
   );
   const shippedByItem = new Map<string, number>();
-  const downpaymentByItem = new Map<string, number>();
   const pendingByItem = new Map<string, number>();
   const shipmentAggregates = new Map<
     string,
@@ -116,11 +115,6 @@ export default async function ReservationDetailsPage({
       shippedByItem.set(
         shipmentItem.reservation_item_id,
         (shippedByItem.get(shipmentItem.reservation_item_id) ?? 0) + quantity,
-      );
-      downpaymentByItem.set(
-        shipmentItem.reservation_item_id,
-        (downpaymentByItem.get(shipmentItem.reservation_item_id) ?? 0) +
-          Number(shipmentItem.downpayment_allocated ?? 0),
       );
     } else if (status === "pending") {
       pendingByItem.set(
@@ -159,7 +153,6 @@ export default async function ReservationDetailsPage({
         remainingQty,
         shippedQty,
         remainingLineTotal: lineTotal,
-        displayDownpayment: 0,
       };
     })
     .filter((item) => item.remainingQty > 0);
@@ -184,7 +177,6 @@ export default async function ReservationDetailsPage({
         ...item,
         displayQuantity: deliveredQty,
         displayDiscount: deliveredDiscount,
-        displayDownpayment: downpaymentByItem.get(item.id) ?? 0,
         displayLineTotal: Math.max(
           Number(item.unit_price) * deliveredQty - deliveredDiscount,
           0,
@@ -475,14 +467,13 @@ export default async function ReservationDetailsPage({
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1100px] border-collapse text-left">
+              <table className="w-full min-w-[950px] border-collapse text-left">
                 <thead className="bg-canvas text-[11px] uppercase tracking-[0.14em] text-muted">
                   <tr>
                     <th className="px-6 py-4 font-bold">Item</th>
                     <th className="px-5 py-4 font-bold">Order date</th>
                     <th className="px-5 py-4 font-bold">Unit price</th>
                     <th className="px-5 py-4 font-bold">{isDeliveredView ? "Delivered quantity" : "Quantity"}</th>
-                    {isDeliveredView && <th className="px-5 py-4 font-bold">Downpayment</th>}
                     <th className="px-5 py-4 font-bold">Discount</th>
                     <th className="px-6 py-4 text-right font-bold">Line total</th>
                   </tr>
@@ -490,7 +481,7 @@ export default async function ReservationDetailsPage({
                 <tbody className="divide-y divide-border">
                   {displayedItems.length === 0 ? (
                     <tr>
-                      <td colSpan={isDeliveredView ? 7 : 6} className="px-6 py-8 text-center text-sm text-muted">
+                      <td colSpan={6} className="px-6 py-8 text-center text-sm text-muted">
                         {isDeliveredView
                           ? "No delivered items are recorded for this order."
                           : "All items have been delivered to the customer."}
@@ -516,11 +507,6 @@ export default async function ReservationDetailsPage({
                           </td>
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">{formatCurrency(Number(item.unit_price))}</td>
                           <td className="px-5 py-4 text-sm font-semibold text-ink">{item.displayQuantity}</td>
-                          {isDeliveredView && (
-                            <td className="whitespace-nowrap px-5 py-4 text-sm text-ink">
-                              {formatCurrency(item.displayDownpayment)}
-                            </td>
-                          )}
                           <td className="whitespace-nowrap px-5 py-4 text-sm text-muted">{formatCurrency(item.displayDiscount)}</td>
                           <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-bold text-ink">{formatCurrency(item.displayLineTotal)}</td>
                         </tr>
@@ -564,7 +550,29 @@ export default async function ReservationDetailsPage({
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
               Payments
             </p>
-            <h2 className="mt-1 font-serif text-2xl text-ink">Payment records</h2>
+            <h2 className="mt-1 font-serif text-2xl text-ink">Downpayment details</h2>
+            <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <PaymentSummaryCard
+                label="Total recorded"
+                value={displayedPaidAmount}
+              />
+              <PaymentSummaryCard
+                label="Applied to releases"
+                value={usedDownpayment}
+              />
+              <PaymentSummaryCard
+                label="Open release hold"
+                value={reservedDownpayment}
+              />
+              <PaymentSummaryCard
+                label="Available downpayment"
+                value={Math.max(
+                  displayedPaidAmount - usedDownpayment - reservedDownpayment,
+                  0,
+                )}
+              />
+            </dl>
+            <h3 className="mt-8 font-serif text-xl text-ink">Payment records</h3>
             {payments?.length ? (
               <div className="mt-6 space-y-4">
                 {payments.map((payment) => {
@@ -872,6 +880,17 @@ function MoneyRow({ label, value, strong = false }: { label: string; value: numb
     <div className="flex items-center justify-between gap-4">
       <dt className={strong ? "font-bold text-ink" : "text-muted"}>{label}</dt>
       <dd className={strong ? "font-bold text-ink" : "font-semibold text-ink"}>{formatCurrency(Number(value))}</dd>
+    </div>
+  );
+}
+
+function PaymentSummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-border bg-canvas/50 p-4">
+      <dt className="text-xs font-semibold text-muted">{label}</dt>
+      <dd className="mt-1 text-base font-black text-ink">
+        {formatCurrency(value)}
+      </dd>
     </div>
   );
 }

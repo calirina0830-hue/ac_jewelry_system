@@ -875,6 +875,18 @@ export type Database = {
         };
         Returns: string;
       };
+      update_reservation_with_payment_adjustment: {
+        Args: {
+          p_reservation_id: string;
+          p_expected_updated_at: string;
+          p_customer_id: string;
+          p_discount: MoneyInput;
+          p_downpayment: MoneyInput;
+          p_notes: string | null;
+          p_items: unknown;
+        };
+        Returns: string;
+      };
     };
     Enums: {
       profile_role: ProfileRole;

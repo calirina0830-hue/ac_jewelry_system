@@ -55,6 +55,14 @@ export function mapReservationDatabaseError(
     };
   }
 
+  if (databaseMessage.includes("downpayment_below_committed")) {
+    return {
+      message:
+        "Downpayment cannot be lower than the amount already committed to releases.",
+      field: "downpayment",
+    };
+  }
+
   if (
     databaseMessage.includes("reservation_not_editable") ||
     databaseMessage.includes("reservation_not_archivable") ||

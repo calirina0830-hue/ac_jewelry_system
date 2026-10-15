@@ -27,7 +27,7 @@ type BulkSelectionContextValue = {
   selectedIds: string[];
   selectAll: (checked: boolean) => void;
   setMessage: (message: string) => void;
-  toggle: (id: string, checked: boolean) => void;
+  toggle: (ids: string[], checked: boolean) => void;
 };
 
 const BulkSelectionContext = createContext<BulkSelectionContextValue | null>(
@@ -80,14 +80,15 @@ export function BulkSelectionProvider({
         setMessage("");
       },
       setMessage,
-      toggle: (id, checked) => {
-        setSelectedIds((current) =>
-          checked
-            ? current.includes(id)
-              ? current
-              : [...current, id]
-            : current.filter((selectedId) => selectedId !== id),
-        );
+      toggle: (ids, checked) => {
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          for (const id of ids) {
+            if (checked) next.add(id);
+            else next.delete(id);
+          }
+          return [...next];
+        });
         setMessage("");
       },
     }),
@@ -106,20 +107,32 @@ export function BulkRowCheckbox({
   value,
 }: {
   label: string;
-  value: string;
+  value: string | string[];
 }) {
   const { selectedIds, toggle } = useBulkSelection();
+  const values = typeof value === "string" ? [value] : value;
+  const checked =
+    values.length > 0 && values.every((id) => selectedIds.includes(id));
   return (
-    <input
-      aria-label={label}
-      checked={selectedIds.includes(value)}
-      className="size-4 accent-gold"
-      form={BULK_FORM_ID}
-      name="reservationIds"
-      onChange={(event) => toggle(value, event.target.checked)}
-      type="checkbox"
-      value={value}
-    />
+    <>
+      <input
+        aria-label={label}
+        checked={checked}
+        className="size-4 accent-gold"
+        onChange={(event) => toggle(values, event.target.checked)}
+        type="checkbox"
+      />
+      {checked &&
+        values.map((id) => (
+          <input
+            form={BULK_FORM_ID}
+            key={id}
+            name="reservationIds"
+            type="hidden"
+            value={id}
+          />
+        ))}
+    </>
   );
 }
 

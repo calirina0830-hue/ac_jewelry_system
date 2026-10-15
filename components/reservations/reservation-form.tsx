@@ -204,7 +204,7 @@ export function ReservationForm({
     (customer) => customer.id === customerId,
   );
   const preview = calculateReservationTotals(
-    items.map((item) => ({
+    [...items, ...(initialValue?.preservedItems ?? []).map(createInitialItem)].map((item) => ({
       unitPriceCents: parseMoneyToCents(item.unitPrice) ?? 0,
       quantity: /^\d+$/.test(item.quantityInput)
         ? Number(item.quantityInput)
@@ -215,7 +215,7 @@ export function ReservationForm({
     parseMoneyToCents(downpayment) ?? 0,
   );
   const serializedItems = JSON.stringify(
-    items.map((item) => ({
+    [...items, ...(initialValue?.preservedItems ?? []).map(createInitialItem)].map((item) => ({
       reservationItemId: item.reservationItemId,
       stockItemId: item.stockItemId,
       quantity: item.quantityInput,
@@ -224,7 +224,11 @@ export function ReservationForm({
       orderedAt: item.orderedAt,
     })),
   );
-
+  const usedDownpaymentCents =
+    parseMoneyToCents(initialValue?.usedDownpayment ?? "0") ?? 0;
+  const reservedDownpaymentCents =
+    parseMoneyToCents(initialValue?.reservedDownpayment ?? "0") ?? 0;
+  const totalDownpaymentCents = parseMoneyToCents(downpayment) ?? 0;
   function updateItem(key: string, update: Partial<DraftItem>) {
     setItems((current) =>
       current.map((item) => (item.key === key ? { ...item, ...update } : item)),
@@ -278,10 +282,6 @@ export function ReservationForm({
           </>
         )}
         <input name="items" type="hidden" value={serializedItems} />
-        {initialValue ? (
-          <input name="downpayment" type="hidden" value={downpayment} />
-        ) : null}
-
         {state.message && (
           <div
             className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
@@ -388,6 +388,14 @@ export function ReservationForm({
           </p>
         ))}
 
+        {(initialValue?.preservedItems?.length ?? 0) > 0 && (
+          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">
+            {initialValue?.preservedItems?.length} fully released item
+            {initialValue?.preservedItems?.length === 1 ? " is" : "s are"} hidden
+            from editing and safely preserved in the reservation history.
+          </p>
+        )}
+
         <div className="mt-5 space-y-4">
           {items.map((item, index) => {
             const selectedStock = stockById.get(item.stockItemId);
@@ -462,7 +470,7 @@ export function ReservationForm({
                   )}
                 </div>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-[minmax(220px,2fr)_140px_110px_140px_150px]">
+                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,2fr)_140px_110px_140px_150px]">
                   <div className="block text-sm font-semibold text-ink">
                     <div className="flex items-center justify-between">
                       <p>Jewelry item</p>
@@ -695,36 +703,49 @@ export function ReservationForm({
               type="number"
               value={reservationDiscount}
             />
-            {!initialValue && (
-              <InputField
-                errors={state.fieldErrors?.downpayment}
-                inputMode="decimal"
-                label="Downpayment"
-                min="0"
-                name="downpayment"
-                onChange={(event) => setDownpayment(event.target.value)}
-                step="0.01"
-                type="number"
-                value={downpayment}
-              />
+            <InputField
+              errors={state.fieldErrors?.downpayment}
+              inputMode="decimal"
+              label="Downpayment"
+              min={
+                initialValue
+                  ? ((usedDownpaymentCents + reservedDownpaymentCents) / 100).toFixed(2)
+                  : "0"
+              }
+              name="downpayment"
+              onChange={(event) => setDownpayment(event.target.value)}
+              step="0.01"
+              type="number"
+              value={downpayment}
+            />
+            {initialValue && (
+              <p className="text-xs leading-5 text-muted">
+                Changes are recorded in Payment records. The amount must cover
+                existing release commitments.
+              </p>
             )}
           </div>
           <dl className="mt-6 space-y-3 border-t border-border pt-5 text-sm">
-            <SummaryRow label="Subtotal" value={preview.subtotalCents} />
-            <SummaryRow
-              label="Reservation discount"
-              value={parseMoneyToCents(reservationDiscount) ?? 0}
-            />
             <SummaryRow label="Total" strong value={preview.totalCents} />
             <SummaryRow
-              label="Downpayment"
-              value={parseMoneyToCents(downpayment) ?? 0}
+              label="Used downpayment"
+              value={totalDownpaymentCents}
             />
-            <SummaryRow label="Balance" strong value={preview.balanceCents} />
           </dl>
+          <div className="mt-3 border-t border-border pt-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
+              Remaining balance for downpayment
+            </p>
+            <dl className="mt-2 text-sm">
+            <SummaryRow
+              label="Remaining balance"
+              strong
+              value={preview.balanceCents}
+            />
+            </dl>
+          </div>
           <p className="mt-4 text-xs leading-5 text-muted">
-            Preview only. Prices, availability, and every total are verified again
-            by the server when saved.
+            Totals update as you edit and are checked again when saved.
           </p>
         </div>
       </section>

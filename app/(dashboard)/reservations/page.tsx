@@ -426,9 +426,15 @@ export default async function ReservationsPage({
       }
     }
 
-    // Every transaction keeps its own row so its values and actions always
-    // point to the reservation represented by that row.
-    const normalizedKey = reservation.id;
+    // Reserved and Paid views compile every order belonging to the same
+    // customer. Delivered, Cancelled, All, and Archive keep transaction rows
+    // separate so their existing release/history behavior does not change.
+    const compileByCustomer =
+      filters.status === "reserved" || filters.status === "paid";
+    const normalizedKey =
+      compileByCustomer
+        ? "customer:" + reservation.customer_id
+        : reservation.id;
 
     const existingIndex = groupIndexByKey.get(normalizedKey);
     if (existingIndex !== undefined) {
@@ -703,8 +709,13 @@ export default async function ReservationsPage({
                         {bulkEnabled && (
                           <td className="px-5 py-4">
                             <BulkRowCheckbox
-                              label={"Select " + primaryReservation.reservation_no}
-                              value={primaryReservation.id}
+                              label={
+                                "Select " +
+                                (isMulti
+                                  ? group.items.length + " orders for " + group.customerName
+                                  : primaryReservation.reservation_no)
+                              }
+                              value={group.items.map((reservation) => reservation.id)}
                             />
                           </td>
                         )}
@@ -720,6 +731,17 @@ export default async function ReservationsPage({
                               <span className="inline-block rounded bg-gold/15 px-1.5 py-0.5 text-[10px] font-semibold text-gold-dark">
                                 +{group.items.length - 1} combined order{group.items.length - 1 === 1 ? "" : "s"}
                               </span>
+                              <div className="mt-1 flex max-w-48 flex-wrap gap-x-2 gap-y-1 text-[10px] font-semibold">
+                                {group.items.slice(1).map((reservation) => (
+                                  <Link
+                                    className="text-gold-dark hover:underline"
+                                    href={"/reservations/" + reservation.id}
+                                    key={reservation.id}
+                                  >
+                                    {reservation.reservation_no}
+                                  </Link>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </td>

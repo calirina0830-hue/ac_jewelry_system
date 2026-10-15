@@ -102,34 +102,34 @@ const BORDER = "#d8d2c2";
 function sharedStyles(): Record<string, Record<string, unknown>> {
   return {
     brandDescriptor: {
-      fontSize: 8,
+      fontSize: 8.5,
       bold: true,
-      characterSpacing: 1.6,
+      characterSpacing: 1.4,
       color: GOLD,
     },
-    brandName: { fontSize: 18, bold: true, color: INK },
-    brandSystem: { fontSize: 8, characterSpacing: 1.2, color: MUTED },
+    brandName: { fontSize: 20, bold: true, color: INK },
+    brandSystem: { fontSize: 8.5, characterSpacing: 1.1, color: MUTED },
     documentTitle: {
-      fontSize: 22,
+      fontSize: 24,
       bold: true,
       color: GOLD,
       alignment: "right",
-      characterSpacing: 1.4,
+      characterSpacing: 1.6,
     },
-    metaLabel: { fontSize: 8, color: MUTED },
+    metaLabel: { fontSize: 8.5, color: MUTED },
     metaValue: { fontSize: 10, bold: true, color: INK },
     sectionLabel: {
-      fontSize: 8,
+      fontSize: 8.5,
       bold: true,
       color: GOLD,
       characterSpacing: 1.2,
     },
-    tableHeader: { fontSize: 8, bold: true, color: GOLD },
-    tableCell: { fontSize: 9, color: INK },
+    tableHeader: { fontSize: 8.5, bold: true, color: GOLD, characterSpacing: 0.5 },
+    tableCell: { fontSize: 9.5, color: INK },
     tableCellMuted: { fontSize: 9, color: MUTED },
-    tableNumber: { fontSize: 9, color: INK, alignment: "right" },
-    totalLabel: { fontSize: 9, color: MUTED },
-    totalValue: { fontSize: 9, color: INK, alignment: "right" },
+    tableNumber: { fontSize: 9.5, color: INK, alignment: "right" },
+    totalLabel: { fontSize: 9.5, color: MUTED },
+    totalValue: { fontSize: 9.5, color: INK, alignment: "right" },
     grandLabel: { fontSize: 11, bold: true, color: INK },
     grandValue: { fontSize: 13, bold: true, color: INK, alignment: "right" },
     footer: { fontSize: 8, color: MUTED, alignment: "center" },
@@ -178,11 +178,27 @@ function headerColumns(
 
 function metaRow(label: string, value: string): PdfContent {
   return {
-    margin: [0, 1, 0, 1],
+    margin: [0, 2.5, 0, 2.5],
     columns: [
-      { text: label, style: "metaLabel", width: 70 },
+      { text: label, style: "metaLabel", width: 88 },
       { text: value, style: "metaValue", width: "*" },
     ],
+  };
+}
+
+function documentTableLayout() {
+  return {
+    hLineColor: () => BORDER,
+    vLineColor: () => BORDER,
+    hLineWidth: (index: number, node: { table: { body: unknown[] } }) =>
+      index === 0 || index === 1 || index === node.table.body.length ? 0.8 : 0.35,
+    vLineWidth: () => 0,
+    paddingLeft: () => 8,
+    paddingRight: () => 8,
+    paddingTop: (rowIndex: number) => (rowIndex === 0 ? 8 : 7),
+    paddingBottom: (rowIndex: number) => (rowIndex === 0 ? 8 : 7),
+    fillColor: (rowIndex: number) =>
+      rowIndex === 0 ? GOLD_SOFT : rowIndex % 2 === 0 ? "#fbfaf7" : null,
   };
 }
 
@@ -216,7 +232,7 @@ function partyColumns(input: {
 
   return {
     columns: [
-      { width: "*", stack: customerLines },
+      { width: "*", stack: customerLines, margin: [0, 0, 14, 0] },
       {
         width: "*",
         stack: [
@@ -232,6 +248,8 @@ function partyColumns(input: {
         ],
       },
     ],
+    columnGap: 20,
+    margin: [0, 2, 0, 0],
   };
 }
 
@@ -245,7 +263,7 @@ function totalsBlock(
       { text: label, style: "totalLabel", width: "*" },
       { text: value, style, width: "auto" },
     ],
-    margin: [0, 1.5, 0, 1.5],
+    margin: [0, 3, 0, 3],
   });
 
   const stack: PdfContent[] = [
@@ -261,11 +279,12 @@ function totalsBlock(
     ),
     row("Total Quantity", String(totalQuantity), "totalValue"),
     {
-      canvas: [{ type: "line", x1: 0, y1: 2, x2: 240, y2: 2, lineColor: BORDER }],
-      margin: [0, 4, 0, 4],
+      canvas: [{ type: "line", x1: 0, y1: 2, x2: 260, y2: 2, lineColor: BORDER }],
+      margin: [0, 6, 0, 6],
     },
     row("Total", formatCurrency(totals.total), "grandValue"),
     row("Amount Paid", formatCurrency(totals.amountPaid), "totalValue"),
+    row("Downpayment", formatCurrency(totals.amountPaid), "totalValue"),
   ];
   if (released) {
     stack.push(
@@ -278,15 +297,24 @@ function totalsBlock(
     if (released.downpaymentApplied > 0) {
       stack.push(
         row(
-          "Applied to released goods",
+          "Applied downpayment to released items",
           formatCurrency(-released.downpaymentApplied),
           "totalValue",
         ),
       );
     }
   }
+  stack.push(
+    row(
+      "Remaining Downpayment Balance",
+      formatCurrency(
+        Math.max(totals.amountPaid - (released?.downpaymentApplied ?? 0), 0),
+      ),
+      "totalValue",
+    ),
+  );
   stack.push({
-    margin: [0, 6, 0, 0],
+    margin: [0, 8, 0, 0],
     table: {
       widths: ["*"],
       body: [
@@ -295,19 +323,19 @@ function totalsBlock(
             border: [true, true, true, true],
             borderColor: GOLD,
             fillColor: GOLD_SOFT,
-            margin: [10, 8, 10, 8],
+            margin: [12, 10, 12, 10],
             columns: [
               {
                 text: "BALANCE DUE",
                 bold: true,
-                fontSize: 9,
+                fontSize: 9.5,
                 color: GOLD,
                 width: "*",
               },
               {
                 text: formatCurrency(totals.balance),
                 bold: true,
-                fontSize: 13,
+                fontSize: 14,
                 color: INK,
                 alignment: "right",
                 width: "auto",
@@ -321,9 +349,9 @@ function totalsBlock(
   });
 
   return {
-    width: 240,
+    width: 260,
     alignment: "right",
-    margin: [0, 12, 0, 0],
+    margin: [0, 16, 0, 0],
     stack,
   };
 }
@@ -383,7 +411,7 @@ export function buildInvoiceDocDefinition(
       canvas: [
         { type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.5, lineColor: GOLD },
       ],
-      margin: [0, 8, 0, 10],
+      margin: [0, 10, 0, 14],
     },
     {
       columns: [
@@ -398,7 +426,7 @@ export function buildInvoiceDocDefinition(
         },
         { width: 20, text: "" },
       ],
-      margin: [0, 0, 0, 12],
+      margin: [0, 0, 0, 16],
     },
     partyColumns({
       customerName: input.customerName,
@@ -411,36 +439,29 @@ export function buildInvoiceDocDefinition(
 
   if (input.notes) {
     content.push({
-      margin: [0, 12, 0, 0],
+      margin: [0, 14, 0, 0],
       stack: [
         { text: "NOTES", style: "sectionLabel" },
-        { text: input.notes, fontSize: 9, color: INK, margin: [0, 3, 0, 0] },
+        { text: input.notes, fontSize: 9.5, color: INK, margin: [0, 4, 0, 0] },
       ],
     });
   }
 
   content.push({
-    margin: [0, 14, 0, 0],
+    margin: [0, 18, 0, 0],
     table: {
       headerRows: 1,
       widths: ["auto", "*", "auto", "auto", "auto", "auto"],
       body: itemBody,
     },
-    layout: {
-      hLineColor: () => BORDER,
-      vLineColor: () => BORDER,
-      hLineWidth: (index: number, node: { table: { body: unknown[] } }) =>
-        index === 0 || index === 1 || index === node.table.body.length ? 1 : 0.5,
-      vLineWidth: () => 0,
-      fillColor: (rowIndex: number) => (rowIndex === 0 ? GOLD_SOFT : null),
-    },
+    layout: documentTableLayout(),
   });
 
   content.push(totalsBlock(input.totals, input.totalQuantity, input.released));
 
   return {
     pageSize: "A4",
-    pageMargins: [40, 40, 40, 48],
+    pageMargins: [40, 42, 40, 52],
     defaultStyle: { font: "Roboto", fontSize: 9, color: INK },
     styles: sharedStyles(),
     footer: footerBuilder(input.business.name, input.generatedAt),
@@ -494,7 +515,7 @@ export function buildShipmentDocDefinition(
       canvas: [
         { type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.5, lineColor: GOLD },
       ],
-      margin: [0, 8, 0, 10],
+      margin: [0, 10, 0, 14],
     },
     {
       columns: [
@@ -513,14 +534,6 @@ export function buildShipmentDocDefinition(
                 ? formatManilaDateTime(input.shippedAt)
                 : formatManilaDate(input.shipmentDate),
             ),
-            ...(input.downpaymentApplied
-              ? [
-                  metaRow(
-                    "Downpayment Applied",
-                    formatCurrency(input.downpaymentApplied),
-                  ),
-                ]
-              : []),
             ...(input.staffName
               ? [metaRow("Processed By", input.staffName)]
               : []),
@@ -528,7 +541,7 @@ export function buildShipmentDocDefinition(
         },
         { width: 20, text: "" },
       ],
-      margin: [0, 0, 0, 12],
+      margin: [0, 0, 0, 16],
     },
     partyColumns({
       customerName: input.customerName,
@@ -541,23 +554,23 @@ export function buildShipmentDocDefinition(
 
   if (input.notes || input.cancelReason) {
     content.push({
-      margin: [0, 12, 0, 0],
+      margin: [0, 14, 0, 0],
       stack: [
         { text: "NOTES", style: "sectionLabel" },
         {
           text: input.cancelReason
             ? "Cancellation reason: " + input.cancelReason
             : input.notes ?? "",
-          fontSize: 9,
+          fontSize: 9.5,
           color: INK,
-          margin: [0, 3, 0, 0],
+          margin: [0, 4, 0, 0],
         },
       ],
     });
   }
 
   content.push({
-    margin: [0, 14, 0, 0],
+    margin: [0, 18, 0, 0],
     table: {
       headerRows: 1,
       widths: hasSubtotals
@@ -565,14 +578,7 @@ export function buildShipmentDocDefinition(
         : ["auto", "*", "auto", "auto"],
       body: itemBody,
     },
-    layout: {
-      hLineColor: () => BORDER,
-      vLineColor: () => BORDER,
-      hLineWidth: (index: number, node: { table: { body: unknown[] } }) =>
-        index === 0 || index === 1 || index === node.table.body.length ? 1 : 0.5,
-      vLineWidth: () => 0,
-      fillColor: (rowIndex: number) => (rowIndex === 0 ? GOLD_SOFT : null),
-    },
+    layout: documentTableLayout(),
   });
 
   const totalRow = (
@@ -580,7 +586,7 @@ export function buildShipmentDocDefinition(
     value: string,
     style: string = "totalValue",
   ): PdfContent => ({
-    margin: [0, 1.5, 0, 1.5],
+    margin: [0, 3, 0, 3],
     columns: [
       { text: label, style: "totalLabel", width: "*" },
       { text: value, style, width: "auto" },
@@ -588,9 +594,6 @@ export function buildShipmentDocDefinition(
   });
 
   const totalsStack: PdfContent[] = [];
-  totalsStack.push(
-    totalRow("Total Quantity", String(input.totalQuantity)),
-  );
   const releasedSubtotal = input.items.reduce(
     (total, item) => total + (item.subtotal ?? 0),
     0,
@@ -600,6 +603,9 @@ export function buildShipmentDocDefinition(
       totalRow("Subtotal", formatCurrency(releasedSubtotal)),
     );
   }
+  totalsStack.push(
+    totalRow("Total Quantity", String(input.totalQuantity)),
+  );
   if (input.downpaymentApplied) {
     totalsStack.push(
       totalRow(
@@ -618,47 +624,61 @@ export function buildShipmentDocDefinition(
   }
   if (hasSubtotals) {
     totalsStack.push({
-      canvas: [{ type: "line", x1: 0, y1: 2, x2: 220, y2: 2, lineColor: BORDER }],
-      margin: [0, 4, 0, 4],
+      canvas: [{ type: "line", x1: 0, y1: 2, x2: 250, y2: 2, lineColor: BORDER }],
+      margin: [0, 6, 0, 6],
     });
     totalsStack.push({
-      columns: [
-        {
-          text: isDeliveredInvoice
-            ? "BALANCE ON DELIVERED ITEMS"
-            : "BALANCE ON RELEASED GOODS",
-          bold: true,
-          fontSize: 9,
-          color: GOLD,
-          width: "*",
-        },
-        {
-          text: formatCurrency(
-            Math.max(releasedSubtotal - (input.downpaymentApplied ?? 0), 0),
-          ),
-          bold: true,
-          fontSize: 12,
-          color: INK,
-          alignment: "right",
-          width: "auto",
-        },
-      ],
-      margin: [0, 2, 0, 2],
+      margin: [0, 8, 0, 0],
+      table: {
+        widths: ["*"],
+        body: [
+          [
+            {
+              border: [true, true, true, true],
+              borderColor: GOLD,
+              fillColor: GOLD_SOFT,
+              margin: [12, 10, 12, 10],
+              columns: [
+                {
+                  text: isDeliveredInvoice
+                    ? "BALANCE ON DELIVERED ITEMS"
+                    : "BALANCE ON RELEASED GOODS",
+                  bold: true,
+                  fontSize: 8.5,
+                  color: GOLD,
+                  width: "*",
+                },
+                {
+                  text: formatCurrency(
+                    Math.max(releasedSubtotal - (input.downpaymentApplied ?? 0), 0),
+                  ),
+                  bold: true,
+                  fontSize: 14,
+                  color: INK,
+                  alignment: "right",
+                  width: "auto",
+                },
+              ],
+            },
+          ],
+        ],
+      },
+      layout: "noBorders",
     });
   }
 
   if (totalsStack.length) {
     content.push({
-      width: 220,
+      width: 250,
       alignment: "right",
-      margin: [0, 12, 0, 0],
+      margin: [0, 16, 0, 0],
       stack: totalsStack,
     });
   }
 
   return {
     pageSize: "A4",
-    pageMargins: [40, 40, 40, 48],
+    pageMargins: [40, 42, 40, 52],
     defaultStyle: { font: "Roboto", fontSize: 9, color: INK },
     styles: sharedStyles(),
     footer: footerBuilder(input.business.name, input.generatedAt),
