@@ -9,9 +9,11 @@ import { createClient } from "@/lib/supabase/server";
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
-  const user = await requireUser();
-  const profile = await getCurrentProfile();
-  const supabase = await createClient();
+  const [user, profile, supabase] = await Promise.all([
+    requireUser(),
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const [
     metricsResult,
     customersResult,

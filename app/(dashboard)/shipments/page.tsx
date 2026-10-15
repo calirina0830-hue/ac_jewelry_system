@@ -43,8 +43,10 @@ export default async function ShipmentsPage({
   const rawParams = await searchParams;
   const filters = shipmentQuerySchema.parse(rawParams);
   const search = sanitizeSearchTerm(filters.q);
-  const profile = await getCurrentProfile();
-  const supabase = await createClient();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const from = (filters.page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 

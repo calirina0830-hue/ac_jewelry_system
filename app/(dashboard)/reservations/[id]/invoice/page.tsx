@@ -28,8 +28,10 @@ export default async function ReservationInvoicePage({
 
   if (!parsedId.success) notFound();
 
-  const supabase = await createClient();
-  const profile = await getCurrentProfile();
+  const [supabase, profile] = await Promise.all([
+    createClient(),
+    getCurrentProfile(),
+  ]);
   const { data: reservation } = await supabase
     .from("reservations")
     .select("*")

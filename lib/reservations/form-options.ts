@@ -24,12 +24,23 @@ export async function getReservationFormOptions({
   const stockItems: ReservationStockOption[] = [];
   let hasError = false;
 
-  const { data: initialCustomers, error: customersError } = await supabase
-    .from("customers")
-    .select("id, name, facebook_name, phone")
-    .is("archived_at", null)
-    .order("name")
-    .limit(INITIAL_OPTION_LIMIT);
+  const [
+    { data: initialCustomers, error: customersError },
+    { data: initialStock, error: stockError },
+  ] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, name, facebook_name, phone")
+      .is("archived_at", null)
+      .order("name")
+      .limit(INITIAL_OPTION_LIMIT),
+    supabase
+      .rpc("get_reservable_stock", {
+        p_exclude_reservation_id: excludeReservationId ?? null,
+      })
+      .order("name")
+      .limit(INITIAL_OPTION_LIMIT),
+  ]);
 
   if (customersError) {
     hasError = true;
@@ -63,15 +74,8 @@ export async function getReservationFormOptions({
     }
   }
 
-  const { data: initialStock, error: stockError } = await supabase
-    .rpc("get_reservable_stock", {
-      p_exclude_reservation_id: excludeReservationId ?? null,
-    })
-    .order("name")
-    .limit(INITIAL_OPTION_LIMIT);
-
   if (stockError || !initialStock || initialStock.some((item) => !item.category)) {
-    const { data: fallbackStock, error: fallbackError } = await supabase
+    const { data: fallbackStock } = await supabase
       .from("stock_items")
       .select("id, sku, name, category, image_path")
       .eq("is_active", true)

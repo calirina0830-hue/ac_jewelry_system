@@ -146,10 +146,12 @@ export default async function ReservationsPage({
   const rawParams = await searchParams;
   const filters = reservationQuerySchema.parse(rawParams);
   const search = sanitizeSearchTerm(filters.q);
-  const profile = await getCurrentProfile();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
-  const supabase = await createClient();
 
   const isAll = filters.pageSize === "all";
   const limit = isAll ? null : Number(filters.pageSize);
@@ -258,18 +260,20 @@ export default async function ReservationsPage({
   const remainingValueByReservation = new Map<string, number>();
   const downpaymentAppliedByReservation = new Map<string, number>();
   if (reservationIds.length) {
-    const { data: reservationItems } = await supabase
-      .from("reservation_items")
-      .select("id, reservation_id, sku, item_name, category, quantity, unit_price, discount")
-      .in("reservation_id", reservationIds)
-      .order("created_at");
-
-    // Fetch confirmed shipments for these reservations
-    const { data: shipments } = await supabase
-      .from("reservation_shipments")
-      .select("id, reservation_id, status, downpayment_applied")
-      .in("reservation_id", reservationIds)
-      .eq("status", "shipped");
+    // These reads are independent, so avoid waiting for one network round trip
+    // before starting the other.
+    const [{ data: reservationItems }, { data: shipments }] = await Promise.all([
+      supabase
+        .from("reservation_items")
+        .select("id, reservation_id, sku, item_name, category, quantity, unit_price, discount")
+        .in("reservation_id", reservationIds)
+        .order("created_at"),
+      supabase
+        .from("reservation_shipments")
+        .select("id, reservation_id, status, downpayment_applied")
+        .in("reservation_id", reservationIds)
+        .eq("status", "shipped"),
+    ]);
 
     const shippedResIds = new Set((shipments ?? []).map((s) => s.reservation_id));
     const shipmentIds = (shipments ?? []).map((s) => s.id);

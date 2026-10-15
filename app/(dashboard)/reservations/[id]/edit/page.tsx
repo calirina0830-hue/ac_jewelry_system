@@ -104,19 +104,20 @@ export default async function EditReservationPage({
     .filter((payment) => !payment.voided_at)
     .reduce((total, payment) => total + Number(payment.amount), 0);
 
-  const options = await getReservationFormOptions({
-    excludeReservationId: reservation.id,
-    includeCustomerId: reservation.customer_id,
-  });
-
   // Query stock_items for current category and info if category is missing or to seed options
   const stockItemIds = [...new Set(items.map((item) => item.stock_item_id).filter(Boolean))];
-  const { data: stockRecords } = stockItemIds.length
-    ? await supabase
-        .from("stock_items")
-        .select("id, sku, name, category, image_path")
-        .in("id", stockItemIds)
-    : { data: [] };
+  const [options, { data: stockRecords }] = await Promise.all([
+    getReservationFormOptions({
+      excludeReservationId: reservation.id,
+      includeCustomerId: reservation.customer_id,
+    }),
+    stockItemIds.length
+      ? supabase
+          .from("stock_items")
+          .select("id, sku, name, category, image_path")
+          .in("id", stockItemIds)
+      : Promise.resolve({ data: [] }),
+  ]);
   const stockMap = new Map((stockRecords ?? []).map((s) => [s.id, s]));
 
   // Ensure stock options include existing reservation items with their categories

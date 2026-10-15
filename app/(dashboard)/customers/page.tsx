@@ -38,10 +38,12 @@ export default async function CustomersPage({
   const rawParams = await searchParams;
   const filters = customerQuerySchema.parse(rawParams);
   const search = sanitizeSearchTerm(filters.q);
-  const profile = await getCurrentProfile();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
-  const supabase = await createClient();
   const from = (filters.page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 

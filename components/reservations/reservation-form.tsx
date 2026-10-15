@@ -147,7 +147,7 @@ export function ReservationForm({
         }
         console.error("Error fetching customer options:", error);
       }
-    }, 200);
+    }, 100);
 
     return () => {
       window.clearTimeout(timer);
@@ -182,7 +182,7 @@ export function ReservationForm({
         }
         console.error("Error fetching stock options:", error);
       }
-    }, 200);
+    }, 100);
 
     return () => {
       window.clearTimeout(timer);

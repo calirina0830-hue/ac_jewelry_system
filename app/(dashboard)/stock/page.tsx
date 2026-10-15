@@ -37,10 +37,12 @@ export default async function StockPage({ searchParams }: StockPageProps) {
   const rawParams = await searchParams;
   const filters = stockQuerySchema.parse(rawParams);
   const search = sanitizeSearchTerm(filters.q);
-  const profile = await getCurrentProfile();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
-  const supabase = await createClient();
   const from = (filters.page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
@@ -68,16 +70,15 @@ export default async function StockPage({ searchParams }: StockPageProps) {
     query = query.or("sku.ilike." + pattern + ",name.ilike." + pattern);
   }
 
-  const {
-    data: items,
-    count,
-    error,
-  } = await query
-    .order(filters.sort, { ascending: filters.direction === "asc" })
-    .range(from, to);
-  const { data: categoryRows } = await supabase
-    .from("stock_items")
-    .select("category");
+  const [
+    { data: items, count, error },
+    { data: categoryRows },
+  ] = await Promise.all([
+    query
+      .order(filters.sort, { ascending: filters.direction === "asc" })
+      .range(from, to),
+    supabase.from("stock_items").select("category"),
+  ]);
   const categories = Array.from(
     new Set([
       ...STOCK_CATEGORIES,

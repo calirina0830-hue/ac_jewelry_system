@@ -47,10 +47,12 @@ export default async function ReservationDetailsPage({
     notFound();
   }
 
-  const profile = await getCurrentProfile();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
-  const supabase = await createClient();
   const { data: reservation } = await supabase
     .from("reservations")
     .select("*")
@@ -66,6 +68,8 @@ export default async function ReservationDetailsPage({
     { data: items },
     { data: statusHistory },
     { data: payments },
+    { data: shipments },
+    { data: creator },
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -85,20 +89,59 @@ export default async function ReservationDetailsPage({
       .select("*")
       .eq("reservation_id", reservation.id)
       .order("recorded_at", { ascending: false }),
+    supabase
+      .from("reservation_shipments")
+      .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
+      .eq("reservation_id", reservation.id)
+      .order("created_at", { ascending: false }),
+    reservation.created_by
+      ? supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", reservation.created_by)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
-  const { data: shipments } = await supabase
-    .from("reservation_shipments")
-    .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
-    .eq("reservation_id", reservation.id)
-    .order("created_at", { ascending: false });
   const shipmentIds = (shipments ?? []).map((shipment) => shipment.id);
-  const { data: shipmentItems } = shipmentIds.length
-    ? await supabase
-        .from("reservation_shipment_items")
-        .select("shipment_id, reservation_item_id, quantity")
-        .in("shipment_id", shipmentIds)
-    : { data: [] };
+  const paymentIds = (payments ?? []).map((payment) => payment.id);
+  const paymentUserIds = [
+    ...new Set(
+      (payments ?? []).flatMap((payment) =>
+        [payment.recorded_by, payment.voided_by].filter(
+          (value): value is string => Boolean(value),
+        ),
+      ),
+    ),
+  ];
+  const [shipmentItemsResult, paymentEvidenceResult, paymentProfilesResult] =
+    await Promise.all([
+      shipmentIds.length
+        ? supabase
+            .from("reservation_shipment_items")
+            .select("shipment_id, reservation_item_id, quantity")
+            .in("shipment_id", shipmentIds)
+        : Promise.resolve({ data: [] }),
+      supabase
+        .from("reservation_payment_evidence")
+        .select("*")
+        .in(
+          "payment_id",
+          paymentIds.length
+            ? paymentIds
+            : ["00000000-0000-0000-0000-000000000000"],
+        )
+        .order("created_at"),
+      paymentUserIds.length
+        ? supabase
+            .from("profiles")
+            .select("id, full_name")
+            .in("id", paymentUserIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+  const shipmentItems = shipmentItemsResult.data;
+  const paymentEvidence = paymentEvidenceResult.data;
+  const paymentProfiles = paymentProfilesResult.data;
   const shipmentStatusById = new Map(
     (shipments ?? []).map((shipment) => [shipment.id, shipment.status]),
   );
@@ -270,17 +313,6 @@ export default async function ReservationDetailsPage({
     (transition) =>
       transition.to !== "delivered" || !reservation.delivered_at,
   );
-  const paymentIds = (payments ?? []).map((payment) => payment.id);
-  const { data: paymentEvidence } = await supabase
-    .from("reservation_payment_evidence")
-    .select("*")
-    .in(
-      "payment_id",
-      paymentIds.length
-        ? paymentIds
-        : ["00000000-0000-0000-0000-000000000000"],
-    )
-    .order("created_at");
   const evidenceByPayment = new Map<string, NonNullable<typeof paymentEvidence>>();
   for (const evidence of paymentEvidence ?? []) {
     evidenceByPayment.set(evidence.payment_id, [
@@ -288,33 +320,9 @@ export default async function ReservationDetailsPage({
       evidence,
     ]);
   }
-  let createdBy = reservation.created_by
-    ? "User " + reservation.created_by.slice(0, 8)
+  const createdBy = reservation.created_by
+    ? creator?.full_name ?? "User " + reservation.created_by.slice(0, 8)
     : "Former team member";
-
-  if (reservation.created_by) {
-    const { data: creator } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", reservation.created_by)
-      .maybeSingle();
-    createdBy = creator?.full_name ?? createdBy;
-  }
-  const paymentUserIds = [
-    ...new Set(
-      (payments ?? []).flatMap((payment) =>
-        [payment.recorded_by, payment.voided_by].filter(
-          (value): value is string => Boolean(value),
-        ),
-      ),
-    ),
-  ];
-  const { data: paymentProfiles } = paymentUserIds.length
-    ? await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", paymentUserIds)
-    : { data: [] };
   const paymentNames = new Map(
     (paymentProfiles ?? []).map((entry) => [entry.id, entry.full_name]),
   );

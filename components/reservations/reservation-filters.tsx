@@ -82,7 +82,7 @@ export function ReservationFilters({
 
     debounceTimerRef.current = setTimeout(() => {
       updateFilters({ q: val });
-    }, 300);
+    }, 150);
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {

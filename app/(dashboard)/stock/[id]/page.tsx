@@ -31,10 +31,12 @@ export default async function StockItemDetailsPage({
     notFound();
   }
 
-  const profile = await getCurrentProfile();
+  const [profile, supabase] = await Promise.all([
+    getCurrentProfile(),
+    createClient(),
+  ]);
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
-  const supabase = await createClient();
   const { data: item } = await supabase
     .from("stock_items")
     .select("*")

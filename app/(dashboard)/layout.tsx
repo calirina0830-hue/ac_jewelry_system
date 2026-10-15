@@ -12,8 +12,10 @@ export default async function DashboardLayout({
 }: {
   children: ReactNode;
 }) {
-  const user = await requireUser();
-  const profile = await getCurrentProfile();
+  const [user, profile] = await Promise.all([
+    requireUser(),
+    getCurrentProfile(),
+  ]);
   const userName =
     profile?.full_name ||
     (typeof user.user_metadata.full_name === "string"
