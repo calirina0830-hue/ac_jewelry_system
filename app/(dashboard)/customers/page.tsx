@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import {
   archiveCustomer,
   restoreCustomer,
 } from "@/actions/customers";
+import {
+  clearCustomerSearch,
+  submitCustomerSearch,
+} from "@/actions/private-search";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -14,7 +20,11 @@ import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
-import { sanitizeSearchTerm } from "@/lib/query";
+import {
+  PRIVATE_SEARCH_COOKIE_NAMES,
+  readPrivateSearchTerm,
+} from "@/lib/private-search";
+import { toSearchParams } from "@/lib/query";
 import { createClient } from "@/lib/supabase/server";
 import { customerQuerySchema } from "@/lib/validation/customers";
 
@@ -36,12 +46,27 @@ export default async function CustomersPage({
   searchParams,
 }: CustomersPageProps) {
   const rawParams = await searchParams;
-  const filters = customerQuerySchema.parse(rawParams);
-  const search = sanitizeSearchTerm(filters.q);
-  const [profile, supabase] = await Promise.all([
+  const [profile, supabase, cookieStore] = await Promise.all([
     getCurrentProfile(),
     createClient(),
+    cookies(),
   ]);
+  const search = readPrivateSearchTerm(
+    cookieStore.get(PRIVATE_SEARCH_COOKIE_NAMES.customers)?.value,
+    profile?.id,
+  );
+  const filters = customerQuerySchema.parse({ ...rawParams, q: search });
+  if (rawParams.q !== undefined) {
+    redirect(
+      "/customers?" +
+        toSearchParams({
+          status: filters.status,
+          sort: filters.sort,
+          direction: filters.direction,
+          page: filters.page,
+        }).toString(),
+    );
+  }
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
   const from = (filters.page - 1) * PAGE_SIZE;
@@ -81,7 +106,6 @@ export default async function CustomersPage({
     .range(from, to);
   const pageCount = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const queryValues = {
-    q: search || undefined,
     status: filters.status,
     sort: filters.sort,
     direction: filters.direction,
@@ -99,8 +123,8 @@ export default async function CustomersPage({
       <PageNotice error={rawParams.error} message={rawParams.message} />
 
       <form
+        action={submitCustomerSearch}
         className="mt-6 grid gap-3 rounded-2xl border border-border bg-white p-4 shadow-card md:grid-cols-[minmax(240px,1fr)_180px_auto]"
-        method="get"
       >
         <label className="sr-only" htmlFor="customer-search">
           Search customers
@@ -125,6 +149,8 @@ export default async function CustomersPage({
           <option value="archived">Archived</option>
           <option value="all">All records</option>
         </select>
+        <input name="sort" type="hidden" value={filters.sort} />
+        <input name="direction" type="hidden" value={filters.direction} />
         <div className="flex gap-2">
           <button
             className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white"
@@ -132,12 +158,13 @@ export default async function CustomersPage({
           >
             Apply
           </button>
-          <Link
+          <button
             className="inline-flex h-11 items-center rounded-xl border border-border px-4 text-sm font-semibold text-muted"
-            href="/customers"
+            formAction={clearCustomerSearch}
+            type="submit"
           >
             Clear
-          </Link>
+          </button>
         </div>
       </form>
 

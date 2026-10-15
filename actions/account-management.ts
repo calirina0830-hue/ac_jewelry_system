@@ -239,9 +239,6 @@ export async function sendPasswordReset(formData: FormData): Promise<void> {
   }
 
   redirect(
-    "/account-management?message=" +
-      encodeURIComponent(
-        "Password reset link sent to " + (account.username ?? account.email) + ".",
-      ),
+    "/account-management?message=password-reset-sent",
   );
 }

@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { sanitizeSearchTerm } from "@/lib/query";
 import { createClient } from "@/lib/supabase/server";
+import { z } from "zod";
 
-export async function GET(request: NextRequest) {
+const customerSearchSchema = z.object({
+  q: z.string().trim().max(100).optional().default(""),
+});
+
+export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -11,9 +16,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ options: [] }, { status: 401 });
   }
 
-  const search = sanitizeSearchTerm(
-    request.nextUrl.searchParams.get("q")?.slice(0, 100) ?? "",
-  );
+  const body = await request.json().catch(() => null);
+  const parsedBody = customerSearchSchema.safeParse(body);
+  if (!parsedBody.success) {
+    return NextResponse.json({ options: [] }, { status: 400 });
+  }
+  const search = sanitizeSearchTerm(parsedBody.data.q);
   let query = supabase
     .from("customers")
     .select("id, name, facebook_name, phone")

@@ -3,8 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { sanitizeSearchTerm } from "@/lib/query";
 import { createClient } from "@/lib/supabase/server";
 import { reservationIdSchema } from "@/lib/validation/reservations";
+import { z } from "zod";
 
-export async function GET(request: NextRequest) {
+const stockSearchSchema = z.object({
+  q: z.string().trim().max(100).optional().default(""),
+  exclude: reservationIdSchema.optional(),
+});
+
+export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -12,13 +18,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ options: [] }, { status: 401 });
   }
 
-  const search = sanitizeSearchTerm(
-    request.nextUrl.searchParams.get("q")?.slice(0, 100) ?? "",
-  );
-  const rawExclude = request.nextUrl.searchParams.get("exclude");
-  const excludeId = rawExclude && reservationIdSchema.safeParse(rawExclude).success
-    ? rawExclude
-    : null;
+  const body = await request.json().catch(() => null);
+  const parsedBody = stockSearchSchema.safeParse(body);
+  if (!parsedBody.success) {
+    return NextResponse.json({ options: [] }, { status: 400 });
+  }
+  const search = sanitizeSearchTerm(parsedBody.data.q);
+  const excludeId = parsedBody.data.exclude ?? null;
   let query = supabase
     .rpc("get_reservable_stock", { p_exclude_reservation_id: excludeId })
     .order("name")

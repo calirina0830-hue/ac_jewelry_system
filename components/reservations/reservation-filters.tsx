@@ -2,7 +2,11 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
+import {
+  applyReservationSearch,
+  clearReservationSearch,
+  submitReservationSearch,
+} from "@/actions/private-search";
 import { RESERVATION_STATUS_OPTIONS } from "@/lib/constants/reservations";
 import { toSearchParams } from "@/lib/query";
 
@@ -32,11 +36,13 @@ export function ReservationFilters({
   const [searchTerm, setSearchTerm] = useState(initialFilters.q ?? "");
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync state if URL changes externally
   useEffect(() => {
-    const currentQ = searchParams.get("q") ?? "";
-    setSearchTerm(currentQ);
-  }, [searchParams]);
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const updateFilters = useCallback(
     (overrides: Partial<FilterValues>) => {
@@ -48,13 +54,11 @@ export function ReservationFilters({
       // Extract current values
       const newStatus = overrides.status !== undefined ? overrides.status : (searchParams.get("status") ?? initialFilters.status);
       const newArchive = overrides.archive !== undefined ? overrides.archive : (searchParams.get("archive") ?? initialFilters.archive);
-      const newQ = overrides.q !== undefined ? overrides.q : (searchParams.get("q") ?? "");
       const newFrom = overrides.fromDate !== undefined ? overrides.fromDate : (searchParams.get("fromDate") ?? "");
       const newTo = overrides.toDate !== undefined ? overrides.toDate : (searchParams.get("toDate") ?? "");
       const newPageSize = overrides.pageSize !== undefined ? overrides.pageSize : (searchParams.get("pageSize") ?? initialFilters.pageSize);
 
       const params = toSearchParams({
-        q: newQ ? newQ.trim() : undefined,
         status: newStatus,
         archive: newArchive,
         fromDate: newFrom || undefined,
@@ -81,7 +85,20 @@ export function ReservationFilters({
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      updateFilters({ q: val });
+      startTransition(() => {
+        void applyReservationSearch(val, {
+          liveBatch: initialFilters.liveBatch,
+          fromDate: searchParams.get("fromDate") ?? initialFilters.fromDate,
+          toDate: searchParams.get("toDate") ?? initialFilters.toDate,
+          status: searchParams.get("status") ?? initialFilters.status,
+          archive: searchParams.get("archive") ?? initialFilters.archive,
+          pageSize:
+            searchParams.get("pageSize") ?? initialFilters.pageSize,
+          sort: searchParams.get("sort") ?? initialFilters.sort,
+          direction:
+            searchParams.get("direction") ?? initialFilters.direction,
+        });
+      });
     }, 150);
   };
 
@@ -113,14 +130,12 @@ export function ReservationFilters({
 
   return (
     <form
+      action={submitReservationSearch}
       className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(240px,1fr)_135px_135px_145px_155px_130px_auto_auto]"
-      method="get"
-      onSubmit={(e) => {
-        e.preventDefault();
+      onSubmit={() => {
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
         }
-        updateFilters({ q: searchTerm });
       }}
     >
       <label className="block" htmlFor="reservation-search">
@@ -137,6 +152,21 @@ export function ReservationFilters({
           value={searchTerm}
         />
       </label>
+      <input
+        name="liveBatch"
+        type="hidden"
+        value={initialFilters.liveBatch ?? ""}
+      />
+      <input
+        name="sort"
+        type="hidden"
+        value={searchParams.get("sort") ?? initialFilters.sort ?? ""}
+      />
+      <input
+        name="direction"
+        type="hidden"
+        value={searchParams.get("direction") ?? initialFilters.direction ?? ""}
+      />
       <label className="block" htmlFor="reservation-from-date">
         <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
           From Date
@@ -222,19 +252,14 @@ export function ReservationFilters({
       >
         {isPending ? "Filtering..." : "Apply"}
       </button>
-      <Link
+      <button
         className="inline-flex h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold text-muted transition hover:border-gold hover:text-ink"
-        href={
-          "/reservations?" +
-          toSearchParams({
-            status: currentStatus,
-            archive: currentArchive,
-          }).toString()
-        }
+        formAction={clearReservationSearch}
         onClick={() => setSearchTerm("")}
+        type="submit"
       >
         Clear
-      </Link>
+      </button>
     </form>
   );
 }

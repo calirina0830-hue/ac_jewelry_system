@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
+import { submitShipmentSearch } from "@/actions/private-search";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageNotice } from "@/components/ui/page-notice";
@@ -8,7 +11,11 @@ import { Pagination } from "@/components/ui/pagination";
 import { getCurrentProfile } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { formatCurrency, formatManilaDateTime } from "@/lib/format";
-import { sanitizeSearchTerm, toSearchParams } from "@/lib/query";
+import { toSearchParams } from "@/lib/query";
+import {
+  PRIVATE_SEARCH_COOKIE_NAMES,
+  readPrivateSearchTerm,
+} from "@/lib/private-search";
 import { createClient } from "@/lib/supabase/server";
 import { shipmentQuerySchema } from "@/lib/validation/shipments";
 
@@ -41,12 +48,22 @@ export default async function ShipmentsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const rawParams = await searchParams;
-  const filters = shipmentQuerySchema.parse(rawParams);
-  const search = sanitizeSearchTerm(filters.q);
-  const [profile, supabase] = await Promise.all([
+  const [profile, supabase, cookieStore] = await Promise.all([
     getCurrentProfile(),
     createClient(),
+    cookies(),
   ]);
+  const search = readPrivateSearchTerm(
+    cookieStore.get(PRIVATE_SEARCH_COOKIE_NAMES.shipments)?.value,
+    profile?.id,
+  );
+  const filters = shipmentQuerySchema.parse({ ...rawParams, q: search });
+  if (rawParams.q !== undefined) {
+    redirect(
+      "/shipments?" +
+        toSearchParams({ status: filters.status, page: filters.page }).toString(),
+    );
+  }
   const from = (filters.page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
@@ -146,7 +163,6 @@ export default async function ShipmentsPage({
 
   const pageCount = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const queryValues = {
-    q: search || undefined,
     status: filters.status,
   };
 
@@ -181,7 +197,6 @@ export default async function ShipmentsPage({
       >
         {STATUS_TABS.map((tab) => {
           const params = toSearchParams({
-            q: search || undefined,
             status: tab.value,
           });
           const active = filters.status === tab.value;
@@ -204,8 +219,8 @@ export default async function ShipmentsPage({
       </nav>
 
       <form
+        action={submitShipmentSearch}
         className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-[minmax(260px,1fr)_auto_auto]"
-        method="get"
       >
         <label className="block" htmlFor="shipment-search">
           <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">

@@ -1,11 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { cookies } from "next/headers";
 
 import { logActivity } from "@/lib/activity";
 import { authorizeRoles } from "@/lib/auth";
 import { createCsv } from "@/lib/export/csv";
 import { filterReservationExportRows } from "@/lib/export/filters";
 import { formatDate } from "@/lib/format";
-import { sanitizeSearchTerm } from "@/lib/query";
+import {
+  PRIVATE_SEARCH_COOKIE_NAMES,
+  readPrivateSearchTerm,
+} from "@/lib/private-search";
 import { getInvoiceStatusLabel } from "@/lib/reservations/invoice";
 import { createClient } from "@/lib/supabase/server";
 import { reservationQuerySchema } from "@/lib/validation/reservations";
@@ -50,7 +54,12 @@ export async function GET(request: NextRequest) {
   }
 
   const rawParams = Object.fromEntries(request.nextUrl.searchParams);
-  const filters = reservationQuerySchema.parse(rawParams);
+  const cookieStore = await cookies();
+  const search = readPrivateSearchTerm(
+    cookieStore.get(PRIVATE_SEARCH_COOKIE_NAMES.reservations)?.value,
+    authorization.user.id,
+  );
+  const filters = reservationQuerySchema.parse({ ...rawParams, q: search });
   const supabase = await createClient();
   const sourceRows: ReservationListRow[] = [];
 
@@ -74,7 +83,6 @@ export async function GET(request: NextRequest) {
     if (!data || data.length < EXPORT_PAGE_SIZE) break;
   }
 
-  const search = sanitizeSearchTerm(filters.q);
   let itemMatchIds: string[] | undefined;
   if (search) {
     const { data: itemMatches, error: itemsError } = await supabase

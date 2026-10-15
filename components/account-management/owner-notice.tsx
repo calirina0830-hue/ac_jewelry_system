@@ -1,4 +1,6 @@
-const MESSAGES: Record<string, string> = {};
+const MESSAGES: Record<string, string> = {
+  "password-reset-sent": "Password reset link sent.",
+};
 
 const ERRORS: Record<string, string> = {
   "not-authorized": "Only the developer and owner may manage accounts.",

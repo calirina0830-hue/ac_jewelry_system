@@ -128,8 +128,13 @@ export function ReservationForm({
     const timer = window.setTimeout(async () => {
       try {
         const response = await fetch(
-          "/reservation-options/customers?q=" + encodeURIComponent(customerSearch),
-          { signal: controller.signal },
+          "/reservation-options/customers",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ q: customerSearch }),
+            signal: controller.signal,
+          },
         );
         if (!response.ok) return;
         const body = (await response.json()) as {
@@ -160,12 +165,17 @@ export function ReservationForm({
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const exclude = initialValue ? "&exclude=" + initialValue.id : "";
         const response = await fetch(
-          "/reservation-options/stock?q=" +
-            encodeURIComponent(pendingStockSearch.query) +
-            exclude,
-          { signal: controller.signal },
+          "/reservation-options/stock",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              q: pendingStockSearch.query,
+              exclude: initialValue?.id,
+            }),
+            signal: controller.signal,
+          },
         );
         if (!response.ok) return;
         const body = (await response.json()) as {

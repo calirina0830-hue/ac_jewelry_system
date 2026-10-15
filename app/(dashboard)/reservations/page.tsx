@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import {
   archiveReservation,
@@ -37,7 +39,11 @@ import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { sanitizeSearchTerm, toSearchParams } from "@/lib/query";
+import { toSearchParams } from "@/lib/query";
+import {
+  PRIVATE_SEARCH_COOKIE_NAMES,
+  readPrivateSearchTerm,
+} from "@/lib/private-search";
 import {
   canRecordReservationPayment,
   getPaymentIneligibilityReason,
@@ -144,12 +150,32 @@ export default async function ReservationsPage({
   searchParams,
 }: ReservationsPageProps) {
   const rawParams = await searchParams;
-  const filters = reservationQuerySchema.parse(rawParams);
-  const search = sanitizeSearchTerm(filters.q);
-  const [profile, supabase] = await Promise.all([
+  const [profile, supabase, cookieStore] = await Promise.all([
     getCurrentProfile(),
     createClient(),
+    cookies(),
   ]);
+  const search = readPrivateSearchTerm(
+    cookieStore.get(PRIVATE_SEARCH_COOKIE_NAMES.reservations)?.value,
+    profile?.id,
+  );
+  const filters = reservationQuerySchema.parse({ ...rawParams, q: search });
+  if (rawParams.q !== undefined) {
+    redirect(
+      "/reservations?" +
+        toSearchParams({
+          liveBatch: filters.liveBatch,
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+          status: filters.status,
+          archive: filters.archive,
+          sort: rawParams.sort ? filters.sort : undefined,
+          direction: rawParams.sort ? filters.direction : undefined,
+          page: filters.page,
+          pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
+        }).toString(),
+    );
+  }
   const canWrite = roleCanWrite(profile?.role);
   const isAdmin = roleIsAdmin(profile?.role);
 
@@ -363,7 +389,6 @@ export default async function ReservationsPage({
     canWrite &&
     (filters.status === "reserved" || filters.status === "paid");
   const queryValues = {
-    q: search || undefined,
     liveBatch: filters.liveBatch || undefined,
     fromDate: filters.fromDate || undefined,
     toDate: filters.toDate || undefined,
@@ -509,7 +534,6 @@ export default async function ReservationsPage({
       >
         {STATUS_TABS.map((tab) => {
           const params = toSearchParams({
-            q: search || undefined,
             liveBatch: filters.liveBatch || undefined,
             fromDate: filters.fromDate || undefined,
             toDate: filters.toDate || undefined,
@@ -574,6 +598,7 @@ export default async function ReservationsPage({
 
       {/* Supported query inputs: name="fromDate" name="toDate" */}
       <ReservationFilters
+        key={search}
         initialFilters={{
           q: search,
           liveBatch: filters.liveBatch,
