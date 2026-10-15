@@ -3,10 +3,18 @@ import { z } from "zod";
 const normalizeTextInput = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
+// Match PostgreSQL char_length(), which counts Unicode code points rather
+// than JavaScript UTF-16 code units. This keeps text limits consistent for
+// supplementary-plane scripts and emoji without imposing a language rule.
+const unicodeLength = (value: string) => Array.from(value).length;
+
 const optionalText = (maximum: number, label: string) =>
   z.preprocess(
     normalizeTextInput,
-    z.string().max(maximum, label + " is too long."),
+    z.string().refine(
+      (value) => unicodeLength(value) <= maximum,
+      label + " is too long.",
+    ),
   ).transform((value) => value || null);
 
 function isValidPhilippinePhone(value: string): boolean {
@@ -36,8 +44,14 @@ export const customerFormSchema = z.object({
     normalizeTextInput,
     z
       .string()
-      .min(2, "Name must be at least 2 characters.")
-      .max(160, "Name must be 160 characters or fewer."),
+      .refine(
+        (value) => unicodeLength(value) >= 1,
+        "Name must contain at least 1 character.",
+      )
+      .refine(
+        (value) => unicodeLength(value) <= 160,
+        "Name must be 160 characters or fewer.",
+      ),
   ),
   facebookName: optionalText(160, "Facebook / CS name"),
   phone: optionalPhone,

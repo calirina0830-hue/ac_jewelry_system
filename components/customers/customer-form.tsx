@@ -41,7 +41,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
             defaultValue={customer?.name}
             errors={state.fieldErrors?.name}
             label="Customer name"
-            maxLength={160}
             name="name"
             placeholder="Full customer name"
             required
@@ -51,7 +50,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
           defaultValue={customer?.facebook_name ?? ""}
           errors={state.fieldErrors?.facebookName}
           label="Facebook / CS name"
-          maxLength={160}
           name="facebookName"
           placeholder="Customer's Facebook display name"
         />
@@ -71,7 +69,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
             defaultValue={customer?.address ?? ""}
             errors={state.fieldErrors?.address}
             label="Address"
-            maxLength={1000}
             name="address"
             placeholder="Customer address"
             rows={3}
@@ -82,7 +79,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
             defaultValue={customer?.notes ?? ""}
             errors={state.fieldErrors?.notes}
             label="Notes"
-            maxLength={4000}
             name="notes"
             placeholder="Preferences, sizing, or other relevant notes"
             rows={5}

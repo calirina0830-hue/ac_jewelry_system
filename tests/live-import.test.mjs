@@ -84,9 +84,10 @@ test("valid six-column XLSX parses the first worksheet without a Date column", a
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Live Orders");
   sheet.addRow([...LIVE_IMPORT_HEADERS]);
-  sheet.addRow(["RinaS", "R001", "Gold Ring", "2", "1500.00", "500"]);
+  sheet.addRow(["山田花子", "R001", "Gold Ring", "2", "1500.00", "500"]);
   const output = await workbook.xlsx.writeBuffer();
   const result = await parseLiveOrderBuffer(Buffer.from(output), "orders.xlsx");
+  assert.equal(result.rows[0].facebookName, "山田花子");
   assert.equal(result.rows[0].itemCode, "R001");
   assert.equal(result.rows[0].itemName, "Gold Ring");
   assert.equal(result.rows[0].quantity, "2");
@@ -176,6 +177,50 @@ test("5. a missing customer is automatically created as New Customer", () => {
   assert.equal(result.rows[0].result, "New Customer");
   assert.equal(result.rows[0].valid, true);
   assert.equal(result.summary.newCustomers, 1);
+});
+
+test("live-order import preserves Unicode names and meaningful internal spacing", async () => {
+  const customerName = "山田　花子 مرحبًا";
+  const parsed = await parseLiveOrderBuffer(
+    Buffer.from(headers + `${customerName},R001,Gold Ring,1,1500,0`),
+    "orders.csv",
+  );
+  const result = preview(parsed.rows);
+
+  assert.equal(parsed.rows[0].facebookName, customerName);
+  assert.equal(result.rows[0].customerMatch, "New Customer");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(toConfirmationRows(result)[0].facebookName, customerName);
+});
+
+test("live-order import accepts and preserves Ñ, accents, and punctuation", () => {
+  const customerName = "José Ñandú O’Connor-Smith";
+  const result = preview([row({ facebookName: customerName })]);
+
+  assert.equal(result.rows[0].customerMatch, "New Customer");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(toConfirmationRows(result)[0].facebookName, customerName);
+});
+
+test("live-order import matches case variants of Ñ customer names", () => {
+  const result = preview([row({ facebookName: "Niñez" })], {
+    customers: [
+      { id: "ninez", name: "José Niñez", facebook_name: "NIÑEZ", created_at: "2026-01-01T00:00:00Z" },
+    ],
+  });
+
+  assert.equal(result.rows[0].customerMatch, "Matched");
+  assert.equal(result.rows[0].valid, true);
+});
+
+test("live-order customer-name limits count Unicode code points", () => {
+  // 81 emoji are 162 UTF-16 code units but 81 PostgreSQL characters.
+  const customerName = "😀".repeat(81);
+  const result = preview([row({ facebookName: customerName })]);
+
+  assert.equal(result.rows[0].customerMatch, "New Customer");
+  assert.equal(result.rows[0].valid, true);
+  assert.equal(toConfirmationRows(result)[0].facebookName, customerName);
 });
 
 test("6. same customer + item + price rows merge quantity (1+2+3 -> 6)", () => {

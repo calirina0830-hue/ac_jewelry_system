@@ -155,3 +155,44 @@ test("Facebook / CS name is optional, trimmed, and length-limited", () => {
     "Facebook / CS name is too long.",
   ]);
 });
+
+test("customer names and details accept Unicode scripts without ASCII filtering", () => {
+  const result = createCustomerSchema.parse({
+    name: "李",
+    facebookName: "山田花子",
+    address: "東京都新宿区・서울・مَرحبًا",
+    notes: "नमस्ते — สวัสดี — Привет",
+  });
+
+  assert.equal(result.name, "李");
+  assert.equal(result.facebookName, "山田花子");
+  assert.equal(result.address, "東京都新宿区・서울・مَرحبًا");
+  assert.equal(result.notes, "नमस्ते — สวัสดี — Привет");
+});
+
+test("customer fields preserve Ñ, accented letters, and punctuation", () => {
+  const result = createCustomerSchema.parse({
+    name: "José Ñandú O’Connor-Smith",
+    facebookName: "Peña & Niñez",
+    address: "Calle Muñoz, 2.º piso",
+    notes: "Prefers rose-gold; contact after 3:00 PM.",
+  });
+
+  assert.equal(result.name, "José Ñandú O’Connor-Smith");
+  assert.equal(result.facebookName, "Peña & Niñez");
+  assert.equal(result.address, "Calle Muñoz, 2.º piso");
+  assert.equal(result.notes, "Prefers rose-gold; contact after 3:00 PM.");
+});
+
+test("customer text limits count Unicode code points, matching database limits", () => {
+  const accepted = createCustomerSchema.safeParse({
+    name: "😀".repeat(160),
+    address: "界".repeat(1000),
+  });
+  const rejected = createCustomerSchema.safeParse({
+    name: "😀".repeat(161),
+  });
+
+  assert.equal(accepted.success, true);
+  assert.equal(rejected.success, false);
+});

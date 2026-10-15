@@ -20,7 +20,8 @@ for sql_file in \
   supabase/migrations/202610210001_delete_archived_reservations.sql \
   supabase/migrations/202610220001_create_reservation_with_downpayment.sql \
   supabase/migrations/202610230001_reuse_customer_reservation.sql \
-  supabase/migrations/202610240001_edit_reservation_downpayment.sql
+  supabase/migrations/202610240001_edit_reservation_downpayment.sql \
+  supabase/migrations/202610250001_allow_unicode_customer_text.sql
 do
   echo "Applying $sql_file..."
   docker run --rm \

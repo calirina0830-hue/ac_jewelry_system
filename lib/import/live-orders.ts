@@ -145,6 +145,10 @@ export function normalizeWhitespace(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
+}
+
 export function normalizeLiveIdentity(value: string): string {
   return normalizeWhitespace(value).toLocaleLowerCase("en");
 }
@@ -311,7 +315,10 @@ function rowsFromMatrix(matrix: string[][]): LiveImportRow[] {
   const rows = matrix.slice(1).flatMap((values, index) => {
     const parsed = blankRow(index + 2);
     headerIndexes.forEach((key, column) => {
-      parsed[key] = normalizeWhitespace(values[column] ?? "");
+      const value = values[column] ?? "";
+      // Preserve meaningful spacing in names (notably ideographic spaces),
+      // while still trimming surrounding whitespace from spreadsheet cells.
+      parsed[key] = key === "facebookName" ? value.trim() : normalizeWhitespace(value);
     });
     const hasValue = Object.entries(parsed).some(
       ([key, value]) => key !== "rowNumber" && value !== "",
@@ -441,7 +448,7 @@ export function buildLiveOrderPreview({
   const resolvedParts = parsed.rows.map<ResolvedPart>((row) => {
     const normalizedRow: LiveImportRow = {
       ...row,
-      facebookName: normalizeWhitespace(row.facebookName),
+      facebookName: row.facebookName.trim(),
       itemCode: normalizeWhitespace(row.itemCode),
       itemName: normalizeWhitespace(row.itemName),
       quantity: normalizeWhitespace(row.quantity),
@@ -529,8 +536,8 @@ export function buildLiveOrderPreview({
 
     const customerMatch =
       !identity ||
-      normalizedRow.facebookName.length > 160 ||
-      proposedName.length < 2
+      unicodeLength(normalizedRow.facebookName) > 160 ||
+      unicodeLength(proposedName) < 2
         ? "Invalid Customer"
         : customerMatches.length >= 1
           ? "Matched"
