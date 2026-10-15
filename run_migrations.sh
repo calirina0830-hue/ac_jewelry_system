@@ -21,7 +21,15 @@ for sql_file in \
   supabase/migrations/202610220001_create_reservation_with_downpayment.sql \
   supabase/migrations/202610230001_reuse_customer_reservation.sql \
   supabase/migrations/202610240001_edit_reservation_downpayment.sql \
-  supabase/migrations/202610250001_allow_unicode_customer_text.sql
+  supabase/migrations/202610250001_allow_unicode_customer_text.sql \
+  supabase/migrations/202610260001_edit_reservation_payment.sql \
+  supabase/migrations/202610270001_prevent_payment_over_item_total.sql \
+  supabase/migrations/202610280001_delete_reservation_payment.sql \
+  supabase/migrations/202610290001_sync_downpayment_from_payment_ledger.sql \
+  supabase/migrations/202610300001_separate_downpayment_from_payments.sql \
+  supabase/migrations/202610310001_reliable_payment_edit.sql \
+  supabase/migrations/202611010001_fix_payment_role_enum.sql \
+  supabase/migrations/202611020001_sync_paid_status_from_remaining_items.sql
 do
   echo "Applying $sql_file..."
   docker run --rm \

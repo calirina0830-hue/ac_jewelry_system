@@ -134,7 +134,7 @@ test("invoice page fetches releases and shows only remaining items", async () =>
     "remainingUnapplied",
     "Already released",
     "Subtotal (remaining items)",
-    "Applied to released goods",
+    "Applied downpayment to released items",
     "All reserved items have been released",
   ]) {
     assert.equal(page.includes(fragment), true, fragment);
@@ -176,6 +176,34 @@ test("only Reserved and Paid lists compile customers; release flows stay separat
   assert.equal(
     listPage.includes('"customer:" + reservation.customer_id'),
     true,
+  );
+  assert.match(
+    listPage,
+    /\(filters\.status === "reserved" \|\| filters\.status === "paid"\)[\s\S]*remainingQty <= 0/,
+  );
+  assert.match(
+    listPage,
+    /filters\.status !== "paid" \|\|[\s\S]*itemsByReservation\.get\(reservation\.id\)/,
+  );
+});
+
+test("payment-ledger reconciliation skips released and delivered reservations", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202610300001_separate_downpayment_from_payments.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  const reconciliation = migration.split(
+    "-- Bring existing balances/statuses in line with their recorded payments",
+  )[1];
+  assert.ok(reconciliation);
+  assert.match(reconciliation, /reservation\.delivered_at is null/i);
+  assert.match(
+    reconciliation,
+    /not exists \([\s\S]*public\.reservation_shipments[\s\S]*shipment\.status = 'shipped'/i,
   );
 });
 
@@ -221,7 +249,7 @@ test("invoice PDF data reflects releases and remaining balance", async () => {
 
   for (const fragment of [
     "Already released",
-    "Applied to released goods",
+    "Applied downpayment to released items",
     "releasedQty",
     "remaining",
   ]) {
@@ -291,23 +319,41 @@ test("reservation detail page displays release quantities and downpayment", asyn
   }
 });
 
-test("reservation details show item downpayment allocations and their breakdown", async () => {
+test("reservation summary uses remaining items and active payment allocation", async () => {
+  const page = await readFile(
+    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(page, /calculatePaymentTransactionSummary/);
+  assert.match(page, /paymentTransaction\.remainingItemsSubtotal/);
+  assert.match(page, /paymentTransaction\.remainingReservationDiscount/);
+  assert.match(page, /paymentTransaction\.remainingItemsTotal/);
+  assert.match(page, /paymentTransaction\.remainingBalance/);
+  assert.match(page, /Payment breakdown/);
+  assert.match(
+    page,
+    /activePaymentTotal\s*-\s*usedDownpayment\s*-\s*reservedDownpayment/,
+  );
+});
+
+test("reservation details keep downpayment separate from item rows", async () => {
   const page = await readFile(
     new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
     "utf8",
   );
 
   for (const fragment of [
-    "allocateDownpaymentByLineTotal",
-    ">Downpayment</th>",
-    "Downpayment details",
-    "Total recorded",
-    "Applied to releases",
-    "Open release hold",
-    "Available downpayment",
+    "Payment and downpayment details",
+    'label="Downpayment"',
+    'label="Applied to releases"',
+    'label="Open release hold"',
+    'label="Available downpayment"',
   ]) {
     assert.equal(page.includes(fragment), true, fragment);
   }
+  assert.equal(page.includes("allocateDownpaymentByLineTotal"), false);
+  assert.equal(page.includes(">Downpayment</th>"), false);
 });
 
 test("reservation edit hides fully released items and shows downpayment details", async () => {
@@ -334,18 +380,17 @@ test("reservation edit hides fully released items and shows downpayment details"
   }
   for (const fragment of [
     "fully released item",
-    "allocateCentsByLineTotal",
-    ">Downpayment</p>",
-    'label="Applied to releases"',
-    'label="Open release hold"',
-    'label="Available downpayment"',
+    "name=\"downpayment\"",
+    "Downpayment is separate from payment records",
+    'label="Used downpayment"',
+    "Remaining balance for downpayment",
   ]) {
     assert.equal(form.includes(fragment), true, "form: " + fragment);
   }
   assert.match(types, /preservedItems\?: ReservationInitialItem\[\]/);
 });
 
-test("reservation edits can adjust downpayment while preserving the payment ledger", async () => {
+test("reservation edits can change downpayment without changing payment records", async () => {
   const [form, actions, migration, errors] = await Promise.all([
     readFile(
       new URL("../components/reservations/reservation-form.tsx", import.meta.url),
@@ -354,7 +399,7 @@ test("reservation edits can adjust downpayment while preserving the payment ledg
     readFile(new URL("../actions/reservations.ts", import.meta.url), "utf8"),
     readFile(
       new URL(
-        "../supabase/migrations/202610240001_edit_reservation_downpayment.sql",
+        "../supabase/migrations/202610300001_separate_downpayment_from_payments.sql",
         import.meta.url,
       ),
       "utf8",
@@ -363,14 +408,18 @@ test("reservation edits can adjust downpayment while preserving the payment ledg
   ]);
 
   assert.equal(form.includes('name="downpayment"'), true);
-  assert.equal(form.includes("Changing this amount creates an adjustment"), true);
+  assert.equal(form.includes("Downpayment is separate from payment records"), true);
   assert.equal(
     actions.includes('"update_reservation_with_payment_adjustment"'),
     true,
   );
   assert.match(migration, /public\.update_reservation\s*\(/i);
-  assert.match(migration, /v_adjustment\s*:=\s*p_downpayment\s*-\s*v_ledger_total/i);
-  assert.match(migration, /insert into public\.reservation_payments/i);
+  assert.doesNotMatch(migration, /v_adjustment\s*:=/i);
+  const editWrapper = migration
+    .split("create or replace function public.update_reservation_with_payment_adjustment")[1]
+    ?.split("$function$;")[0];
+  assert.ok(editWrapper);
+  assert.doesNotMatch(editWrapper, /insert into public\.reservation_payments/i);
   assert.match(migration, /downpayment_below_committed/i);
   assert.match(errors, /downpayment_below_committed/);
 });

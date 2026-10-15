@@ -16,6 +16,7 @@ import {
   buildBulkPaymentHref,
   parseBulkPaymentIds,
 } from "../lib/reservations/payment-selection.ts";
+import { calculatePaymentTransactionSummary } from "../lib/reservations/payment-transaction.ts";
 import {
   buildPaymentEvidencePath,
   getPaymentEvidenceUrl,
@@ -111,6 +112,80 @@ test("negative payment recalculates total paid and remaining balance", () => {
   const totals = getInvoiceTotals(reservation, totalPaid);
   assert.equal(totals.amountPaid, 500);
   assert.equal(totals.balance, 1898);
+});
+
+test("record payment totals use unreleased items and active payment records", () => {
+  const summary = calculatePaymentTransactionSummary({
+    originalTotal: 2200,
+    reservationDiscount: 200,
+    items: [
+      {
+        id: "item-1",
+        sku: "R-1",
+        itemName: "Ring",
+        category: "Ring",
+        quantity: 2,
+        unitPrice: 1000,
+        discount: 100,
+      },
+      {
+        id: "item-2",
+        sku: "N-1",
+        itemName: "Necklace",
+        category: "Necklace",
+        quantity: 1,
+        unitPrice: 500,
+        discount: 0,
+      },
+    ],
+    shipments: [
+      {
+        id: "release-1",
+        status: "shipped",
+        downpaymentApplied: 600,
+      },
+      {
+        id: "cancelled-release",
+        status: "cancelled",
+        downpaymentApplied: 999,
+      },
+    ],
+    shipmentItems: [
+      {
+        shipmentId: "release-1",
+        reservationItemId: "item-1",
+        quantity: 1,
+      },
+      {
+        shipmentId: "cancelled-release",
+        reservationItemId: "item-2",
+        quantity: 1,
+      },
+    ],
+    payments: [500, 300],
+  });
+
+  assert.equal(summary.originalTotal, 2200);
+  assert.equal(summary.remainingItemsSubtotal, 1450);
+  assert.equal(summary.remainingReservationDiscount, 120);
+  assert.equal(summary.remainingItemsTotal, 1330);
+  assert.equal(summary.totalPaid, 800);
+  assert.equal(summary.paymentCount, 2);
+  assert.equal(summary.appliedToReleases, 600);
+  assert.equal(summary.paidTowardRemaining, 200);
+  assert.equal(summary.remainingBalance, 1130);
+  assert.deepEqual(
+    summary.items.map((item) => ({
+      id: item.id,
+      released: item.releasedQuantity,
+      remaining: item.remainingQuantity,
+      total: item.remainingTotal,
+    })),
+    [
+      { id: "item-1", released: 1, remaining: 1, total: 950 },
+      { id: "item-2", released: 0, remaining: 1, total: 500 },
+    ],
+  );
 });
 
 test("payment evidence validates MIME plus image signature and safe authenticated paths", async () => {
@@ -388,8 +463,14 @@ test("bulk payment review records partial payments and cleans every failed uploa
   assert.match(card, /Payment amount/);
   assert.match(card, /Payment method/);
   assert.match(card, /PaymentEvidenceInput/);
-  assert.match(card, /Current total paid/);
-  assert.match(card, /Current remaining balance/);
+  assert.doesNotMatch(card, /Paid after this payment/);
+  assert.match(card, /Amount items to be paid/);
+  assert.match(card, /Balance after this payment/);
+  assert.match(card, /Items still requiring payment/);
+  assert.match(card, /Applied to releases/);
+  assert.match(page, /loadPaymentTransactionSummaries/);
+  assert.match(action, /loadPaymentTransactionSummaries/);
+  assert.match(action, /remainingBalance/);
   assert.match(action, /bulk_record_reservation_payments/);
   assert.doesNotMatch(action, /\.upload\(/);
   assert.match(action, /formData\.values\(\)[\s\S]*?instanceof File/);

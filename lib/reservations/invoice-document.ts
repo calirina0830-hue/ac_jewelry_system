@@ -58,6 +58,8 @@ export interface InvoiceDocumentInput {
     reservationDiscount: number;
     total: number;
     amountPaid: number;
+    downpayment: number;
+    remainingDownpayment: number;
     balance: number;
   };
   totalQuantity: number;
@@ -284,7 +286,7 @@ function totalsBlock(
     },
     row("Total", formatCurrency(totals.total), "grandValue"),
     row("Amount Paid", formatCurrency(totals.amountPaid), "totalValue"),
-    row("Downpayment", formatCurrency(totals.amountPaid), "totalValue"),
+    row("Downpayment", formatCurrency(totals.downpayment), "totalValue"),
   ];
   if (released) {
     stack.push(
@@ -307,9 +309,7 @@ function totalsBlock(
   stack.push(
     row(
       "Remaining Downpayment Balance",
-      formatCurrency(
-        Math.max(totals.amountPaid - (released?.downpaymentApplied ?? 0), 0),
-      ),
+      formatCurrency(totals.remainingDownpayment),
       "totalValue",
     ),
   );

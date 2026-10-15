@@ -285,10 +285,15 @@ export default async function ReservationsPage({
   const releasedValueByReservation = new Map<string, number>();
   const remainingValueByReservation = new Map<string, number>();
   const downpaymentAppliedByReservation = new Map<string, number>();
+  const activePaidByReservation = new Map<string, number>();
   if (reservationIds.length) {
     // These reads are independent, so avoid waiting for one network round trip
     // before starting the other.
-    const [{ data: reservationItems }, { data: shipments }] = await Promise.all([
+    const [
+      { data: reservationItems },
+      { data: shipments },
+      { data: paymentRows },
+    ] = await Promise.all([
       supabase
         .from("reservation_items")
         .select("id, reservation_id, sku, item_name, category, quantity, unit_price, discount")
@@ -299,7 +304,20 @@ export default async function ReservationsPage({
         .select("id, reservation_id, status, downpayment_applied")
         .in("reservation_id", reservationIds)
         .eq("status", "shipped"),
+      supabase
+        .from("reservation_payments")
+        .select("reservation_id, amount")
+        .in("reservation_id", reservationIds)
+        .is("voided_at", null),
     ]);
+
+    for (const payment of paymentRows ?? []) {
+      activePaidByReservation.set(
+        payment.reservation_id,
+        (activePaidByReservation.get(payment.reservation_id) ?? 0) +
+          Number(payment.amount),
+      );
+    }
 
     const shippedResIds = new Set((shipments ?? []).map((s) => s.reservation_id));
     const shipmentIds = (shipments ?? []).map((s) => s.id);
@@ -353,8 +371,13 @@ export default async function ReservationsPage({
         (remainingValueByReservation.get(item.reservation_id) ?? 0) + remainingItemValue,
       );
 
-      // On 'reserved' status tab, don't show items that have already been released
-      if (filters.status === "reserved" && shippedQty > 0 && remainingQty <= 0) {
+      // Released quantities belong in Delivered, never in Reserved or Paid.
+      // Keep a partially released line visible while it still has an unreleased
+      // quantity, but remove it once the full line has shipped.
+      if (
+        (filters.status === "reserved" || filters.status === "paid") &&
+        remainingQty <= 0
+      ) {
         continue;
       }
       // On 'delivered' status tab:
@@ -398,8 +421,13 @@ export default async function ReservationsPage({
     sort: sortColumn,
     direction: filters.direction,
   };
+  const visibleReservations = (reservations ?? []).filter(
+    (reservation) =>
+      filters.status !== "paid" ||
+      (itemsByReservation.get(reservation.id)?.length ?? 0) > 0,
+  );
   const bulkSelectionRows = bulkEnabled
-    ? (reservations ?? []).map((reservation) => ({
+    ? visibleReservations.map((reservation) => ({
         id: reservation.id,
         label: reservation.reservation_no,
         paymentIneligibilityReason:
@@ -423,9 +451,9 @@ export default async function ReservationsPage({
   const customerGroups: CustomerGroup[] = [];
   const groupIndexByKey = new Map<string, number>();
 
-  for (const reservation of reservations ?? []) {
+  for (const reservation of visibleReservations) {
     let resTotal = Number(reservation.total);
-    let resPaid = Number(reservation.downpayment);
+    let resPaid = activePaidByReservation.get(reservation.id) ?? 0;
     let resDownpayment = 0;
     let resBalance = Number(reservation.balance);
 
@@ -495,7 +523,7 @@ export default async function ReservationsPage({
     }
   }
 
-  const showingCount = reservations?.length ?? 0;
+  const showingCount = visibleReservations.length;
 
   return (
     <div className="mx-auto max-w-[1550px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -646,7 +674,7 @@ export default async function ReservationsPage({
             Reservations could not be loaded. Confirm the Phase 3 migration has
             been applied.
           </div>
-        ) : !reservations?.length ? (
+        ) : !visibleReservations.length ? (
           (() => {
             const emptyConfig = getEmptyStateConfig(filters.status, filters.archive, canWrite, search);
             return (
@@ -713,7 +741,7 @@ export default async function ReservationsPage({
                     const hasPartiallyPaid = group.items.some(
                       (r) =>
                         r.status === "reserved" &&
-                        Number(r.downpayment) > 0 &&
+                        (activePaidByReservation.get(r.id) ?? 0) > 0 &&
                         Number(r.balance) > 0,
                     );
                     // Determine consolidated status

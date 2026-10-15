@@ -622,6 +622,26 @@ export type Database = {
           results: unknown[];
         };
       };
+      edit_reservation_payment: {
+        Args: {
+          p_payment_id: string;
+          p_expected_payment_recorded_at: string;
+          p_expected_reservation_updated_at: string;
+          p_amount: MoneyInput;
+          p_payment_method: string | null;
+          p_reference_no: string | null;
+          p_notes: string | null;
+        };
+        Returns: unknown;
+      };
+      delete_reservation_payment: {
+        Args: {
+          p_payment_id: string;
+          p_expected_payment_recorded_at: string;
+          p_expected_reservation_updated_at: string;
+        };
+        Returns: unknown;
+      };
       bulk_revert_paid_reservations: {
         Args: { p_reservation_ids: string[]; p_reason: string };
         Returns: number;

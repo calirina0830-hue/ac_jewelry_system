@@ -176,8 +176,11 @@ test("reservation selectors use bounded authenticated search without email label
     readFile(new URL("../app/reservation-options/stock/route.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.equal(form.includes("/reservation-options/customers?q="), true);
-  assert.equal(form.includes("/reservation-options/stock?q="), true);
+  assert.equal(form.includes('"/reservation-options/customers"'), true);
+  assert.equal(form.includes('"/reservation-options/stock"'), true);
+  assert.equal(form.includes("/reservation-options/customers?q="), false);
+  assert.equal(form.includes("/reservation-options/stock?q="), false);
+  assert.match(form, /method:\s*"POST"/);
   assert.match(form, /Search jewelry item\.\.\./);
   assert.match(form, /function JewelryItemCombobox/);
   assert.match(form, /ArrowDown/);

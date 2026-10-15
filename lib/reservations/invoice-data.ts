@@ -68,11 +68,9 @@ export async function loadInvoiceDocument(
           .order("created_at")
       : { data: [] };
 
-  const paymentTotal = payments?.length
-    ? payments
-        .filter((payment) => !payment.voided_at)
-        .reduce((total, payment) => total + Number(payment.amount), 0)
-    : undefined;
+  const paymentTotal = (payments ?? [])
+    .filter((payment) => !payment.voided_at)
+    .reduce((total, payment) => total + Number(payment.amount), 0);
   const totals = getInvoiceTotals(reservation, paymentTotal);
 
   const releaseLedger = computeReleaseLedger(
@@ -111,6 +109,7 @@ export async function loadInvoiceDocument(
     0,
   );
   const downpaymentCommitted = releaseLedger.downpaymentCommitted;
+  const downpaymentAmount = Number(reservation.downpayment);
   const remainingUnapplied = Math.max(
     totals.amountPaid - downpaymentCommitted,
     0,
@@ -158,6 +157,11 @@ export async function loadInvoiceDocument(
         reservationDiscount: remainingReservationDiscount,
         total: remainingTotal,
         amountPaid: totals.amountPaid,
+        downpayment: downpaymentAmount,
+        remainingDownpayment: Math.max(
+          downpaymentAmount - downpaymentCommitted,
+          0,
+        ),
         balance: balanceDue,
       },
       totalQuantity: releaseLedger.remainingUnits,

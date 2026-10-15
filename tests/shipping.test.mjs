@@ -185,6 +185,8 @@ test("invoice document renders every item without dropping order dates", () => {
       reservationDiscount: 0,
       total: 12000,
       amountPaid: 6000,
+      downpayment: 3000,
+      remainingDownpayment: 3000,
       balance: 6000,
     },
     totalQuantity: 120,

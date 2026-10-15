@@ -67,7 +67,6 @@ export async function GET(
     { data: customer },
     { data: staffProfile },
     { data: allShipments },
-    { data: payments },
     { data: resData },
   ] = await Promise.all([
     supabase
@@ -94,24 +93,20 @@ export async function GET(
       .select("status, downpayment_applied")
       .eq("reservation_id", reservation.id),
     supabase
-      .from("reservation_payments")
-      .select("amount")
-      .eq("reservation_id", reservation.id)
-      .is("voided_at", null),
-    supabase
       .from("reservations")
       .select("downpayment")
       .eq("id", reservation.id)
       .maybeSingle(),
   ]);
 
-  const paymentRows = payments ?? [];
-  const ledgerPaid = paymentRows.reduce((sum, row) => sum + Number(row.amount), 0);
-  const paidAmount = paymentRows.length > 0 ? ledgerPaid : Number(resData?.downpayment ?? 0);
+  const downpaymentAmount = Number(resData?.downpayment ?? 0);
   const totalDownpaymentApplied = (allShipments ?? [])
     .filter((s) => s.status === "shipped")
     .reduce((sum, s) => sum + Number(s.downpayment_applied ?? 0), 0);
-  const remainingDownpayment = Math.max(paidAmount - totalDownpaymentApplied, 0);
+  const remainingDownpayment = Math.max(
+    downpaymentAmount - totalDownpaymentApplied,
+    0,
+  );
 
   const lineById = new Map((lineItems ?? []).map((line) => [line.id, line]));
   const items = shipmentItems.map((item) => {

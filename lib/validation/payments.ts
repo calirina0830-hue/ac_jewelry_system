@@ -55,6 +55,18 @@ export const paymentEntrySchema = z.object({
   notes: optionalText(2000, "Payment notes are too long."),
 });
 
+export const editPaymentSchema = paymentEntrySchema.extend({
+  paymentId: z.string().uuid(),
+  expectedPaymentRecordedAt: z.iso.datetime({ offset: true }),
+});
+
+export const deletePaymentSchema = z.object({
+  paymentId: z.string().uuid(),
+  reservationId: z.string().uuid(),
+  expectedUpdatedAt: z.iso.datetime({ offset: true }),
+  expectedPaymentRecordedAt: z.iso.datetime({ offset: true }),
+});
+
 export const paymentEvidenceMetadataSchema = z
   .object({
     storage_path: z.string().trim().min(1).max(512),

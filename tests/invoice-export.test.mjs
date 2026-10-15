@@ -74,23 +74,29 @@ test("invoice focuses on order details without exposing customer details", async
   assert.equal(page.includes("Total Quantity"), true);
 });
 
-test("invoice totals use stored reservation values", () => {
-  assert.deepEqual(
-    getInvoiceTotals({
-      subtotal: "2500.00",
-      discount: "100.00",
-      total: "2400.00",
-      downpayment: "500.00",
-      balance: "1900.00",
-    }),
-    {
-      subtotal: 2500,
-      reservationDiscount: 100,
-      total: 2400,
-      amountPaid: 500,
-      balance: 1900,
-    },
-  );
+test("invoice totals keep downpayment separate from recorded payments", () => {
+  const reservation = {
+    subtotal: "2500.00",
+    discount: "100.00",
+    total: "2400.00",
+    downpayment: "500.00",
+    balance: "1900.00",
+  };
+
+  assert.deepEqual(getInvoiceTotals(reservation), {
+    subtotal: 2500,
+    reservationDiscount: 100,
+    total: 2400,
+    amountPaid: 0,
+    balance: 2400,
+  });
+  assert.deepEqual(getInvoiceTotals(reservation, 500), {
+    subtotal: 2500,
+    reservationDiscount: 100,
+    total: 2400,
+    amountPaid: 500,
+    balance: 1900,
+  });
 });
 
 test("invoice supports every reservation status", () => {

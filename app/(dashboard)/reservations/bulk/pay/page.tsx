@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { getCurrentProfile, roleCanWrite } from "@/lib/auth";
 import { canRecordReservationPayment } from "@/lib/reservations/payment-eligibility";
 import { parseBulkPaymentIds } from "@/lib/reservations/payment-selection";
+import { loadPaymentTransactionSummaries } from "@/lib/reservations/payment-transaction-data";
 import { createClient } from "@/lib/supabase/server";
 import { paymentBatchIdsSchema } from "@/lib/validation/payments";
 
@@ -20,7 +21,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   "too-many-evidence": "Upload no more than 5 evidence images per payment.",
   "evidence-upload-failed": "Payment evidence could not be uploaded.",
   "pricing-incomplete": "Complete item pricing before recording a payment.",
-  overpayment: "A payment cannot exceed the reservation's remaining balance.",
+  overpayment: "Total payments cannot exceed the value of the reservation items after discounts.",
   "deduction-exceeds-paid": "A deduction cannot exceed the total already paid.",
   "stale-reservation": "A reservation changed after this page loaded. Reload and review it.",
   "payment-failed": "No payments were recorded. Review the entries and try again.",
@@ -47,7 +48,7 @@ export default async function BulkPaymentPage({
   const supabase = await createClient();
   const { data: reservations } = await supabase
     .from("reservations")
-    .select("id, reservation_no, customer_id, total, downpayment, balance, pricing_complete, status, archived_at, updated_at")
+    .select("id, reservation_no, customer_id, total, discount, downpayment, balance, pricing_complete, status, archived_at, updated_at")
     .in("id", idsResult.data);
   if (
     !reservations ||
@@ -58,11 +59,23 @@ export default async function BulkPaymentPage({
   }
 
   const customerIds = [...new Set(reservations.map((item) => item.customer_id))];
-  const { data: customers } = await supabase
-    .from("customers")
-    .select("id, name, facebook_name")
-    .in("id", customerIds);
+  const [{ data: customers }, transactionByReservation] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, name, facebook_name")
+      .in("id", customerIds),
+    loadPaymentTransactionSummaries(supabase, reservations),
+  ]);
   const customerById = new Map((customers ?? []).map((item) => [item.id, item]));
+  if (
+    reservations.some(
+      (reservation) =>
+        (transactionByReservation.get(reservation.id)?.remainingBalance ?? 0) <=
+        0,
+    )
+  ) {
+    redirect("/reservations?status=reserved&error=invalid-bulk-selection");
+  }
   const ordered = idsResult.data
     .map((id) => reservations.find((item) => item.id === id))
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -87,6 +100,8 @@ export default async function BulkPaymentPage({
         <input name="reservationIds" type="hidden" value={JSON.stringify(idsResult.data)} />
         {ordered.map((reservation) => {
           const customer = customerById.get(reservation.customer_id);
+          const transaction = transactionByReservation.get(reservation.id);
+          if (!transaction) return null;
           return (
             <RecordPaymentCard
               key={reservation.id}
@@ -97,11 +112,9 @@ export default async function BulkPaymentPage({
               reservation={{
                 id: reservation.id,
                 reservation_no: reservation.reservation_no,
-                total: Number(reservation.total),
-                downpayment: Number(reservation.downpayment),
-                balance: Number(reservation.balance),
                 updated_at: reservation.updated_at,
                 pricing_complete: reservation.pricing_complete,
+                transaction,
               }}
             />
           );

@@ -8,6 +8,8 @@ const MESSAGES: Record<string, string> = {
   "status-paid": "Reservation marked as paid.",
   "status-delivered": "Reservation marked as delivered.",
   "status-cancelled": "Reservation cancelled and its stock commitment released.",
+  "payment-edited": "Payment record corrected. The original entry remains in the audit history.",
+  "payment-deleted": "Payment removed from active totals. The original entry remains in the audit history.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -23,6 +25,17 @@ const ERRORS: Record<string, string> = {
     "Some selected reservations cannot receive a payment. Review their current status, pricing, and balance.",
   "stale-reservation":
     "This reservation changed in another session. Reload before trying again.",
+  "stale-payment": "This payment changed in another session. Reload before trying again.",
+  "payment-not-editable": "This payment or reservation can no longer be changed.",
+  "payment-downpayment-committed":
+    "This payment cannot be removed because its funds are committed to a release.",
+  "payment-delete-deduction-exceeds-paid":
+    "This payment cannot be removed while a deduction would leave the remaining payment total below zero.",
+  "payment-delete-exceeds-total":
+    "This deduction cannot be removed because it would make total payments exceed the item value.",
+  "payment-delete-migration-required":
+    "Payment removal is not available yet. Apply the latest database migrations, then try again.",
+  "payment-delete-failed": "The payment could not be removed. Please try again.",
 };
 
 export function PageNotice({

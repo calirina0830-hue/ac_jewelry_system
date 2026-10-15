@@ -55,6 +55,13 @@ export function mapReservationDatabaseError(
     };
   }
 
+  if (databaseMessage.includes("payment_exceeds_items_total")) {
+    return {
+      message: "Total payments cannot exceed the value of the reservation items after discounts.",
+      field: "downpayment",
+    };
+  }
+
   if (databaseMessage.includes("downpayment_below_committed")) {
     return {
       message:

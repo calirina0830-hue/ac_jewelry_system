@@ -47,7 +47,6 @@ export default async function EditReservationPage({
   const [
     { data: items },
     { data: shipments },
-    { data: payments },
   ] = await Promise.all([
     supabase
       .from("reservation_items")
@@ -57,10 +56,6 @@ export default async function EditReservationPage({
     supabase
       .from("reservation_shipments")
       .select("id, status, downpayment_applied")
-      .eq("reservation_id", reservation.id),
-    supabase
-      .from("reservation_payments")
-      .select("amount, voided_at")
       .eq("reservation_id", reservation.id),
   ]);
 
@@ -100,10 +95,6 @@ export default async function EditReservationPage({
       (total, shipment) => total + Number(shipment.downpayment_applied ?? 0),
       0,
     );
-  const activePaymentTotal = (payments ?? [])
-    .filter((payment) => !payment.voided_at)
-    .reduce((total, payment) => total + Number(payment.amount), 0);
-
   // Query stock_items for current category and info if category is missing or to seed options
   const stockItemIds = [...new Set(items.map((item) => item.stock_item_id).filter(Boolean))];
   const [options, { data: stockRecords }] = await Promise.all([
@@ -145,9 +136,7 @@ export default async function EditReservationPage({
   });
 
   const combinedDiscount = Number(reservation.discount);
-  const combinedDownpayment = payments?.length
-    ? activePaymentTotal
-    : Number(reservation.downpayment);
+  const combinedDownpayment = Number(reservation.downpayment);
 
   const toInitialItem = (
     item: (typeof itemsWithCategory)[number],

@@ -111,11 +111,9 @@ export default async function ReservationInvoicePage({
       "Viewed or printed invoice " + reservation.reservation_no + ".",
   });
 
-  const paymentTotal = payments?.length
-    ? payments
-        .filter((payment) => !payment.voided_at)
-        .reduce((total, payment) => total + Number(payment.amount), 0)
-    : undefined;
+  const paymentTotal = (payments ?? [])
+    .filter((payment) => !payment.voided_at)
+    .reduce((total, payment) => total + Number(payment.amount), 0);
   const totals = getInvoiceTotals(reservation, paymentTotal);
 
   const grossTotal = releaseLedger.items.reduce(
@@ -134,6 +132,7 @@ export default async function ReservationInvoicePage({
     0,
   );
   const downpaymentCommitted = releaseLedger.downpaymentCommitted;
+  const downpaymentAmount = Number(reservation.downpayment);
   const remainingUnapplied = Math.max(
     totals.amountPaid - downpaymentCommitted,
     0,
@@ -492,7 +491,7 @@ export default async function ReservationInvoicePage({
             </div>
             <InvoiceTotal emphasize label="Total" value={remainingTotal} />
             <InvoiceTotal label="Amount Paid" value={totals.amountPaid} />
-            <InvoiceTotal label="Downpayment" value={totals.amountPaid} />
+            <InvoiceTotal label="Downpayment" value={downpaymentAmount} />
             {downpaymentCommitted > 0 && (
               <InvoiceTotal
                 label="Applied downpayment to released items"
@@ -501,7 +500,7 @@ export default async function ReservationInvoicePage({
             )}
             <InvoiceTotal
               label="Remaining Downpayment Balance"
-              value={remainingUnapplied}
+              value={Math.max(downpaymentAmount - downpaymentCommitted, 0)}
             />
             <div
               className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-gold/60 bg-gold-soft px-5 py-4"

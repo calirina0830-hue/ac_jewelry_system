@@ -7,7 +7,13 @@ import {
   restoreReservation,
   transitionReservationStatus,
 } from "@/actions/reservations";
+import { deleteReservationPayment } from "@/actions/payments";
 import { OrderDateEditor } from "@/components/reservations/order-date-editor";
+import { EditPaymentRecord } from "@/components/reservations/edit-payment-record";
+import {
+  PaymentEditHistory,
+  type PaymentEditHistoryEntry,
+} from "@/components/reservations/payment-edit-history";
 import { PaymentEvidenceViewer } from "@/components/reservations/payment-evidence-viewer";
 import { ReleaseStatusBadge } from "@/components/reservations/release-status";
 import { ReservationStatus } from "@/components/reservations/reservation-status";
@@ -22,6 +28,7 @@ import {
   canRecordReservationPayment,
   needsReservationPricing,
 } from "@/lib/reservations/payment-eligibility";
+import { calculatePaymentTransactionSummary } from "@/lib/reservations/payment-transaction";
 import { getReleaseDisplayStatus } from "@/lib/reservations/release";
 import { createClient } from "@/lib/supabase/server";
 import { getReservationTransitions } from "@/lib/reservations/status";
@@ -62,6 +69,11 @@ export default async function ReservationDetailsPage({
   if (!reservation) {
     notFound();
   }
+  const canManagePaymentRecords =
+    canWrite &&
+    !isDeliveredView &&
+    !reservation.archived_at &&
+    (reservation.status === "reserved" || reservation.status === "paid");
 
   const [
     { data: customer },
@@ -326,18 +338,91 @@ export default async function ReservationDetailsPage({
   const paymentNames = new Map(
     (paymentProfiles ?? []).map((entry) => [entry.id, entry.full_name]),
   );
+  const paymentById = new Map(
+    (payments ?? []).map((payment) => [payment.id, payment]),
+  );
+  const previousPaymentByReplacementId = new Map<
+    string,
+    NonNullable<typeof payments>[number]
+  >();
+  for (const payment of payments ?? []) {
+    const replacementId = payment.void_reason?.match(
+      /^Edited and replaced by payment ([0-9a-f-]{36})\.$/i,
+    )?.[1];
+    if (replacementId && paymentById.has(replacementId)) {
+      previousPaymentByReplacementId.set(replacementId, payment);
+    }
+  }
+  const paymentEditHistory = new Map<string, PaymentEditHistoryEntry[]>();
+  for (const payment of payments ?? []) {
+    const history: PaymentEditHistoryEntry[] = [];
+    const visited = new Set<string>();
+    let currentPayment = payment;
+    let previousPayment = previousPaymentByReplacementId.get(currentPayment.id);
+
+    while (previousPayment && !visited.has(previousPayment.id)) {
+      visited.add(previousPayment.id);
+      history.push({
+        previousAmount: Number(previousPayment.amount),
+        editedAmount: Number(currentPayment.amount),
+        editedAt: previousPayment.voided_at ?? currentPayment.recorded_at,
+        editedBy: previousPayment.voided_by
+          ? paymentNames.get(previousPayment.voided_by) ?? "Team member"
+          : "Former team member",
+      });
+      currentPayment = previousPayment;
+      previousPayment = previousPaymentByReplacementId.get(currentPayment.id);
+    }
+
+    if (history.length > 0) {
+      paymentEditHistory.set(payment.id, history.reverse());
+    }
+  }
+  const visiblePayments = (payments ?? []).filter(
+    (payment) =>
+      !payment.void_reason?.startsWith("Edited and replaced by payment "),
+  );
   const activePaymentTotal = (payments ?? [])
     .filter((payment) => !payment.voided_at)
     .reduce((total, payment) => total + Number(payment.amount), 0);
+  const paymentTransaction = calculatePaymentTransactionSummary({
+    originalTotal: Number(reservation.total),
+    reservationDiscount: Number(reservation.discount),
+    items: (items ?? []).map((item) => ({
+      id: item.id,
+      sku: item.sku,
+      itemName: item.item_name,
+      category: item.category,
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unit_price),
+      discount: Number(item.discount ?? 0),
+    })),
+    shipments: (shipments ?? []).map((shipment) => ({
+      id: shipment.id,
+      status: shipment.status,
+      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+    })),
+    shipmentItems: (shipmentItems ?? []).map((item) => ({
+      shipmentId: item.shipment_id,
+      reservationItemId: item.reservation_item_id,
+      quantity: Number(item.quantity),
+    })),
+    payments: (payments ?? [])
+      .filter((payment) => !payment.voided_at)
+      .map((payment) => Number(payment.amount)),
+  });
+  const remainingQuantity = paymentTransaction.items.reduce(
+    (total, item) => total + item.remainingQuantity,
+    0,
+  );
+  const downpaymentAmount = Number(reservation.downpayment);
   const displayedPaidAmount = isDeliveredView
     ? usedDownpayment
-    : payments?.length
-      ? activePaymentTotal
-      : Number(reservation.downpayment);
-  const combinedSubtotal = Number(reservation.subtotal);
-  const combinedDiscount = Number(reservation.discount);
-  const combinedTotal = Number(reservation.total);
-  const combinedBalance = Number(reservation.balance);
+    : activePaymentTotal;
+  const combinedSubtotal = paymentTransaction.remainingItemsSubtotal;
+  const combinedDiscount = paymentTransaction.remainingReservationDiscount;
+  const combinedTotal = paymentTransaction.remainingItemsTotal;
+  const combinedBalance = paymentTransaction.remainingBalance;
 
   return (
     <div className="mx-auto max-w-[1250px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -535,7 +620,7 @@ export default async function ReservationDetailsPage({
             <ShippingPanel
               canShip={canShip}
               canWrite={canWrite}
-              downpayment={displayedPaidAmount}
+              downpayment={downpaymentAmount}
               isAdmin={isAdmin}
               items={shippingItems}
               reservationId={reservation.id}
@@ -558,11 +643,15 @@ export default async function ReservationDetailsPage({
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
               Payments
             </p>
-            <h2 className="mt-1 font-serif text-2xl text-ink">Downpayment details</h2>
+            <h2 className="mt-1 font-serif text-2xl text-ink">Payment and downpayment details</h2>
             <dl className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PaymentSummaryCard
-                label="Total recorded"
-                value={displayedPaidAmount}
+                label="Total received"
+                value={activePaymentTotal}
+              />
+              <PaymentSummaryCard
+                label="Downpayment"
+                value={downpaymentAmount}
               />
               <PaymentSummaryCard
                 label="Applied to releases"
@@ -575,15 +664,16 @@ export default async function ReservationDetailsPage({
               <PaymentSummaryCard
                 label="Available downpayment"
                 value={Math.max(
-                  displayedPaidAmount - usedDownpayment - reservedDownpayment,
+                  downpaymentAmount - usedDownpayment - reservedDownpayment,
                   0,
                 )}
               />
             </dl>
             <h3 className="mt-8 font-serif text-xl text-ink">Payment records</h3>
-            {payments?.length ? (
+            {visiblePayments.length ? (
               <div className="mt-6 space-y-4">
-                {payments.map((payment) => {
+                {visiblePayments.map((payment) => {
+                  const editHistory = paymentEditHistory.get(payment.id) ?? [];
                   const normalizedEvidence = evidenceByPayment.get(payment.id) ?? [];
                   const evidenceItems = normalizedEvidence.length
                     ? normalizedEvidence.flatMap((evidence, index) => {
@@ -623,11 +713,45 @@ export default async function ReservationDetailsPage({
                             {formatCurrency(Number(payment.amount))}
                           </p>
                         </div>
-                        {payment.voided_at && (
-                          <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-800">
-                            Voided
-                          </span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {payment.voided_at && (
+                            <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-800">
+                              Voided
+                            </span>
+                          )}
+                          {editHistory.length > 0 && (
+                            <PaymentEditHistory entries={editHistory} />
+                          )}
+                          {canManagePaymentRecords && !payment.voided_at && (
+                            <>
+                              <EditPaymentRecord
+                                paymentId={payment.id}
+                                reservationId={reservation.id}
+                                reservationUpdatedAt={reservation.updated_at}
+                                paymentRecordedAt={payment.recorded_at}
+                                amount={Number(payment.amount)}
+                                paymentMethod={payment.payment_method}
+                                referenceNo={payment.reference_no}
+                                notes={payment.notes}
+                              />
+                              <ConfirmAction
+                                action={deleteReservationPayment.bind(
+                                  null,
+                                  payment.id,
+                                  reservation.id,
+                                  payment.recorded_at,
+                                  reservation.updated_at,
+                                )}
+                                appearance="compact-danger"
+                                confirmation={
+                                  "Remove this payment from active totals? Its record and evidence will remain in the audit history, and the reservation balance may increase."
+                                }
+                              >
+                                Delete
+                              </ConfirmAction>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
                         <RecordItem label="Date/time" value={formatDateTime(payment.recorded_at)} />
@@ -721,7 +845,7 @@ export default async function ReservationDetailsPage({
             )}
             <SummaryTextRow
               label={isDeliveredView ? "Delivered quantity" : "Quantity"}
-              value={String(isDeliveredView ? deliveredQuantity : items?.length ?? 0)}
+              value={String(isDeliveredView ? deliveredQuantity : remainingQuantity)}
             />
             <MoneyRow
               label={isDeliveredView ? "Delivered item subtotal" : "Subtotal"}
@@ -755,11 +879,11 @@ export default async function ReservationDetailsPage({
                 </div>
               )}
           </dl>
-          {!isDeliveredView && displayedPaidAmount > 0 && (
+          {!isDeliveredView && activePaymentTotal > 0 && (
             <dl className="mt-5 space-y-3 rounded-2xl border border-border bg-canvas/40 p-4 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-xs font-bold uppercase tracking-[0.15em] text-muted">
-                  Downpayment breakdown
+                  Payment breakdown
                 </dt>
                 <ReleaseStatusBadge status={releaseStatus} />
               </div>
@@ -774,7 +898,7 @@ export default async function ReservationDetailsPage({
                 label="Remaining unapplied"
                 strong
                 value={Math.max(
-                  displayedPaidAmount -
+                  activePaymentTotal -
                     usedDownpayment -
                     reservedDownpayment,
                   0,

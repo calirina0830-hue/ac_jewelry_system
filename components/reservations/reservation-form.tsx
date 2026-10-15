@@ -730,8 +730,8 @@ export function ReservationForm({
             />
             {initialValue && (
               <p className="text-xs leading-5 text-muted">
-                Changes are recorded in Payment records. The amount must cover
-                existing release commitments.
+                Downpayment is separate from payment records. It must cover
+                any existing release commitments.
               </p>
             )}
           </div>

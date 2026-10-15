@@ -76,7 +76,7 @@ export function InvoiceActionBar({
       status: "error",
       message:
         code === "overpayment"
-          ? "Payment cannot exceed the balance due."
+          ? "Total payments cannot exceed the value of the reservation items after discounts."
           : code === "deduction-exceeds-paid"
             ? "A deduction cannot exceed the total already paid."
             : code === "pricing-incomplete"
