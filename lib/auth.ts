@@ -13,6 +13,20 @@ function redirectToSignOut(reason: "expired" | "disabled" | "profile"): never {
   redirect(`/auth/signout?reason=${reason}`);
 }
 
+// This result is shared by requireUser() and getCurrentProfile() within a
+// server render. Keeping account status and profile fields together avoids a
+// second Supabase round trip on every dashboard page.
+const getProfileRecord = cache(async (userId: string) => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, avatar_url, username, is_active")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return data;
+});
+
 export const requireUser = cache(async () => {
   const supabase = await createClient();
   const {
@@ -26,15 +40,11 @@ export const requireUser = cache(async () => {
     redirectToSignOut("expired");
   }
 
-  // Disabled accounts are signed out on their next request.
+  // Disabled accounts are signed out on their next request. The same cached
+  // lookup is reused below by getCurrentProfile().
   try {
-    const { data: accountStatus } = await supabase
-      .from("profiles")
-      .select("is_active")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (accountStatus && (accountStatus as { is_active?: boolean }).is_active === false) {
+    const profile = await getProfileRecord(user.id);
+    if (profile?.is_active === false) {
       redirectToSignOut("disabled");
     }
   } catch {
@@ -46,19 +56,12 @@ export const requireUser = cache(async () => {
 
 export const getCurrentProfile = cache(async () => {
   const user = await requireUser();
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("profiles")
-    .select("id, full_name, role, avatar_url")
-    .eq("id", user.id)
-    .maybeSingle();
+  const data = await getProfileRecord(user.id);
 
   if (data) {
     return {
       ...data,
-      username:
-        (data as { username?: string | null }).username ??
-        (user.email ? user.email.split("@")[0] : null),
+      username: data.username ?? (user.email ? user.email.split("@")[0] : null),
     };
   }
 

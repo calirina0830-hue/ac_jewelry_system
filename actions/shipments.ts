@@ -7,6 +7,7 @@ import { authorizeRoles } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   cancelShipmentSchema,
+  editShipmentSchema,
   orderedAtSchema,
   prepareReleaseSchema,
   releaseItemsSchema,
@@ -447,55 +448,38 @@ export async function createItemRelease(
       totalQuantity: releaseResult.totalQuantity,
     });
 
-    // Determine if all items in this reservation have been shipped
-    const { data: allItemsInRes } = await supabase
-      .from("reservation_items")
-      .select("id, quantity")
-      .eq("reservation_id", resId);
-
-    const resItemIds = (allItemsInRes ?? []).map((i) => i.id);
-    let allShipped = false;
-
-    if (resItemIds.length > 0) {
-      // Find all shipped quantities for items in this reservation
-      const { data: resShipments } = await supabase
-        .from("reservation_shipments")
-        .select("id")
-        .eq("reservation_id", resId)
-        .eq("status", "shipped");
-
-      const shippedShipmentIds = (resShipments ?? []).map((s) => s.id);
-      const shippedMap = new Map<string, number>();
-
-      if (shippedShipmentIds.length > 0) {
-        const { data: shippedItems } = await supabase
-          .from("reservation_shipment_items")
-          .select("reservation_item_id, quantity")
-          .in("shipment_id", shippedShipmentIds);
-
-        for (const si of shippedItems ?? []) {
-          shippedMap.set(
-            si.reservation_item_id,
-            (shippedMap.get(si.reservation_item_id) ?? 0) + Number(si.quantity),
-          );
-        }
-      }
-
-      allShipped = (allItemsInRes ?? []).every((item) => {
-        const shipped = shippedMap.get(item.id) ?? 0;
-        return shipped >= Number(item.quantity);
-      });
-    }
-
-    // If all items are now shipped, mark status as 'delivered' and record delivered_at
-    if (allShipped) {
+    // A successful item release is treated as a delivered handover. The
+    // transition RPC preserves the financial status (reserved/paid) while
+    // recording delivered_at, so partial-payment balances remain unchanged.
+    const { data: currentReservation, error: reservationLookupError } =
       await supabase
         .from("reservations")
-        .update({
-          delivered_at: formattedDate,
-          status: "delivered",
-        })
-        .eq("id", resId);
+        .select("status, delivered_at, updated_at")
+        .eq("id", resId)
+        .maybeSingle();
+
+    if (
+      !reservationLookupError &&
+      currentReservation &&
+      !currentReservation.delivered_at &&
+      (currentReservation.status === "reserved" ||
+        currentReservation.status === "paid")
+    ) {
+      const { error: deliveryError } = await supabase.rpc(
+        "transition_reservation_status",
+        {
+          p_reservation_id: resId,
+          p_new_status: "delivered",
+          p_expected_updated_at: currentReservation.updated_at,
+        },
+      );
+
+      if (deliveryError) {
+        console.error(
+          "Release succeeded but automatic delivery marking failed for " + resId,
+          deliveryError.code,
+        );
+      }
     }
 
     revalidateReservation(resId);
@@ -714,6 +698,147 @@ export async function cancelShipment(
   return {
     status: "success",
     message: "Shipment " + data.shipmentNo + " cancelled.",
+  };
+}
+
+export async function editShipmentDetails(
+  reservationId: string,
+  shipmentId: string,
+  expectedUpdatedAt: string,
+  shippedAt: string,
+  notes: string,
+  correctionReason: string,
+): Promise<ShipmentMutationResult> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  const parsed = editShipmentSchema.safeParse({
+    reservationId,
+    shipmentId,
+    expectedUpdatedAt,
+    shippedAt,
+    notes,
+    correctionReason,
+  });
+
+  if (!authorization) {
+    return {
+      status: "error",
+      message: "You do not have permission to edit releases.",
+    };
+  }
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: parsed.error.issues[0]?.message ?? "Review the release correction.",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("edit_reservation_shipment", {
+    p_shipment_id: parsed.data.shipmentId,
+    p_expected_updated_at: parsed.data.expectedUpdatedAt,
+    p_shipped_at: parsed.data.shippedAt,
+    p_notes: parsed.data.notes || null,
+    p_correction_reason: parsed.data.correctionReason,
+  });
+
+  if (error || !data) {
+    console.error("Release correction failed", error?.code ?? "no-data");
+    const message = error?.message ?? "";
+    return {
+      status: "error",
+      message: message.includes("stale_shipment")
+        ? "This release was changed by someone else. Refresh and try again."
+        : message.includes("shipment_not_editable")
+          ? "Only an active delivered release can be corrected."
+          : shipmentErrorMessage(message),
+    };
+  }
+
+  revalidateReservation(parsed.data.reservationId);
+  await logActivity(supabase, {
+    action: "shipment_corrected",
+    entityType: "reservation_shipment",
+    entityId: parsed.data.shipmentId,
+    description: "Corrected release " + data.shipmentNo + ".",
+    metadata: {
+      reservation_id: parsed.data.reservationId,
+      shipment_id: parsed.data.shipmentId,
+      shipment_no: data.shipmentNo,
+      shipped_at: parsed.data.shippedAt,
+      correction_reason: parsed.data.correctionReason,
+    },
+  });
+
+  return {
+    status: "success",
+    message: "Release " + data.shipmentNo + " corrected.",
+    shipmentId: data.shipmentId,
+    shipmentNo: data.shipmentNo,
+  };
+}
+
+export async function voidShipment(
+  reservationId: string,
+  shipmentId: string,
+  reason: string,
+): Promise<ShipmentMutationResult> {
+  const authorization = await authorizeRoles(WRITE_ROLES);
+  const parsed = editShipmentSchema.shape.correctionReason.safeParse(reason);
+
+  if (!authorization) {
+    return {
+      status: "error",
+      message: "You do not have permission to void releases.",
+    };
+  }
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: parsed.error.issues[0]?.message ?? "Enter a void reason.",
+    };
+  }
+
+  const shipmentParsed = shipmentIdSchema.safeParse(shipmentId);
+  const reservationParsed = shipmentIdSchema.safeParse(reservationId);
+  if (!shipmentParsed.success || !reservationParsed.success) {
+    return { status: "error", message: "Invalid release." };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("cancel_reservation_shipment", {
+    p_shipment_id: shipmentParsed.data,
+    p_reason: parsed.data,
+  });
+
+  if (error || !data) {
+    console.error("Release void failed", error?.code ?? "no-data");
+    return {
+      status: "error",
+      message: error?.message?.includes("not_authorized")
+        ? "Only an admin can void a delivered release."
+        : shipmentErrorMessage(error?.message ?? ""),
+    };
+  }
+
+  revalidateReservation(reservationParsed.data);
+  await logActivity(supabase, {
+    action: "shipment_voided",
+    entityType: "reservation_shipment",
+    entityId: shipmentParsed.data,
+    description: "Voided release " + data.shipmentNo + ".",
+    metadata: {
+      reservation_id: reservationParsed.data,
+      shipment_id: shipmentParsed.data,
+      shipment_no: data.shipmentNo,
+      void_reason: parsed.data,
+    },
+  });
+
+  return {
+    status: "success",
+    message: "Release " + data.shipmentNo + " voided.",
+    shipmentId: data.shipmentId,
+    shipmentNo: data.shipmentNo,
   };
 }
 

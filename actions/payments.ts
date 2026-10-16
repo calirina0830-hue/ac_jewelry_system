@@ -17,7 +17,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import {
   editPaymentSchema,
-  deletePaymentSchema,
+  voidPaymentSchema,
   paymentBatchIdsSchema,
   paymentEvidenceListSchema,
   paymentEntrySchema,
@@ -69,9 +69,10 @@ function parseIds(formData: FormData): string[] | null {
   }
 }
 
-function paymentUrl(ids: string[], error?: string): string {
+function paymentUrl(ids: string[], error?: string, mode?: string): string {
   const query = new URLSearchParams({ ids: ids.join(",") });
   if (error) query.set("error", error);
+  if (mode) query.set("mode", mode);
   return "/reservations/bulk/pay?" + query.toString();
 }
 
@@ -214,6 +215,8 @@ export async function recordReservationPayments(
 ): Promise<RecordPaymentsResult> {
   const authorization = await authorizeRoles(["admin", "staff"]);
   const ids = parseIds(formData);
+  const isSettlement = formData.get("paymentMode") === "settle";
+  const paymentMode = isSettlement ? "settle" : undefined;
   if (!authorization || !ids) {
     return {
       status: "error",
@@ -227,7 +230,7 @@ export async function recordReservationPayments(
     authorization.user.id,
   );
   if (!evidenceSubmission) {
-    return { status: "error", redirectTo: paymentUrl(ids, "invalid-evidence") };
+    return { status: "error", redirectTo: paymentUrl(ids, "invalid-evidence", paymentMode) };
   }
 
   const entries = ids.map((id) =>
@@ -243,7 +246,7 @@ export async function recordReservationPayments(
   if (entries.some((entry) => !entry.success)) {
     const supabase = await createClient();
     await cleanupEvidence(supabase, evidenceSubmission.paths);
-    return { status: "error", redirectTo: paymentUrl(ids, "invalid-payment") };
+    return { status: "error", redirectTo: paymentUrl(ids, "invalid-payment", paymentMode) };
   }
 
   const supabase = await createClient();
@@ -251,7 +254,7 @@ export async function recordReservationPayments(
 
   const { data: currentReservations, error: reservationError } = await supabase
     .from("reservations")
-    .select("id, total, discount")
+    .select("id, total, discount, balance, status, delivered_at")
     .in("id", ids);
   if (
     reservationError ||
@@ -259,7 +262,20 @@ export async function recordReservationPayments(
     currentReservations.length !== ids.length
   ) {
     await cleanupEvidence(supabase, evidenceSubmission.paths);
-    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed") };
+    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed", paymentMode) };
+  }
+
+  if (
+    isSettlement &&
+    currentReservations.some(
+      (reservation) =>
+        reservation.status !== "reserved" ||
+        !reservation.delivered_at ||
+        Number(reservation.balance) <= 0,
+    )
+  ) {
+    await cleanupEvidence(supabase, evidenceSubmission.paths);
+    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed", paymentMode) };
   }
 
   let transactionSummaries;
@@ -271,26 +287,29 @@ export async function recordReservationPayments(
   } catch (error) {
     logPaymentError("Payment transaction summary failed", error);
     await cleanupEvidence(supabase, evidenceSubmission.paths);
-    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed") };
+    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed", paymentMode) };
   }
 
   for (const entry of entries) {
     if (!entry.success || entry.data.amount < 0) continue;
-    const remainingBalance = transactionSummaries.get(
-      entry.data.reservationId,
-    )?.remainingBalance;
+    const currentReservation = currentReservations.find(
+      (reservation) => reservation.id === entry.data.reservationId,
+    );
+    const remainingBalance = isSettlement
+      ? Number(currentReservation?.balance ?? 0)
+      : transactionSummaries.get(entry.data.reservationId)?.remainingBalance;
     if (
       remainingBalance === undefined ||
       entry.data.amount > Math.round(remainingBalance * 100)
     ) {
       await cleanupEvidence(supabase, evidenceSubmission.paths);
-      return { status: "error", redirectTo: paymentUrl(ids, "overpayment") };
+      return { status: "error", redirectTo: paymentUrl(ids, "overpayment", paymentMode) };
     }
   }
 
   if (!(await verifyEvidenceObjects(supabase, evidenceSubmission.byReservation))) {
     await cleanupEvidence(supabase, evidenceSubmission.paths);
-    return { status: "error", redirectTo: paymentUrl(ids, "invalid-evidence") };
+    return { status: "error", redirectTo: paymentUrl(ids, "invalid-evidence", paymentMode) };
   }
 
   for (const parsed of entries) {
@@ -323,7 +342,7 @@ export async function recordReservationPayments(
   } catch (error) {
     logPaymentError("Bulk payment recording threw", error);
     await cleanupEvidence(supabase, evidenceSubmission.paths);
-    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed") };
+    return { status: "error", redirectTo: paymentUrl(ids, "payment-failed", paymentMode) };
   }
   if (rpcError) {
     logPaymentError("Bulk payment recording failed", rpcError);
@@ -339,7 +358,7 @@ export async function recordReservationPayments(
           : message.includes("stale_reservation")
             ? "stale-reservation"
             : "payment-failed";
-    return { status: "error", redirectTo: paymentUrl(ids, code) };
+    return { status: "error", redirectTo: paymentUrl(ids, code, paymentMode) };
   }
 
   revalidatePath("/reservations");
@@ -362,7 +381,9 @@ export async function recordReservationPayments(
   return {
     status: "success",
     redirectTo:
-      ids.length === 1
+      isSettlement
+        ? "/reservations?status=settled&message=settled"
+        : ids.length === 1
         ? "/reservations/" + ids[0] + "?message=" + encodeURIComponent(
             wasFullySettled
               ? "Final payment recorded. Reservation is now Paid."
@@ -514,18 +535,14 @@ export async function editReservationPayment(
   };
 }
 
-export async function deleteReservationPayment(
-  paymentId: string,
-  reservationId: string,
-  expectedPaymentRecordedAt: string,
-  expectedUpdatedAt: string,
-): Promise<void> {
+export async function voidReservationPayment(formData: FormData): Promise<void> {
   const authorization = await authorizeRoles(["admin", "staff"]);
-  const parsed = deletePaymentSchema.safeParse({
-    paymentId,
-    reservationId,
-    expectedPaymentRecordedAt,
-    expectedUpdatedAt,
+  const parsed = voidPaymentSchema.safeParse({
+    paymentId: formData.get("paymentId"),
+    reservationId: formData.get("reservationId"),
+    expectedPaymentRecordedAt: formData.get("expectedPaymentRecordedAt"),
+    expectedUpdatedAt: formData.get("expectedUpdatedAt"),
+    remarks: formData.get("remarks"),
   });
 
   if (!authorization || !parsed.success) {
@@ -539,16 +556,17 @@ export async function deleteReservationPayment(
       p_payment_id: parsed.data.paymentId,
       p_expected_payment_recorded_at: parsed.data.expectedPaymentRecordedAt,
       p_expected_reservation_updated_at: parsed.data.expectedUpdatedAt,
+      p_void_reason: parsed.data.remarks,
     });
   } catch (error) {
-    logPaymentError("Payment deletion threw", error);
+    logPaymentError("Payment void threw", error);
     redirect(
-      "/reservations/" + parsed.data.reservationId + "?error=payment-delete-failed",
+      "/reservations/" + parsed.data.reservationId + "?error=payment-void-failed",
     );
   }
 
   if (result.error) {
-    logPaymentError("Payment deletion failed", result.error);
+    logPaymentError("Payment void failed", result.error);
     const message = String(getErrorField(result.error, "message") ?? "");
     const code = String(getErrorField(result.error, "code") ?? "");
     const error = message.includes("stale_reservation")
@@ -556,23 +574,25 @@ export async function deleteReservationPayment(
       : message.includes("stale_payment")
         ? "stale-payment"
         : message.includes("deduction_exceeds_paid")
-          ? "payment-delete-deduction-exceeds-paid"
+          ? "payment-void-deduction-exceeds-paid"
           : message.includes("downpayment_below_committed")
-            ? "payment-downpayment-committed"
+            ? "payment-void-downpayment-committed"
             : message.includes("payment_delete_exceeds_total")
-              ? "payment-delete-exceeds-total"
-            : message.includes("payment_not_editable") ||
-                message.includes("reservation_not_editable")
-              ? "payment-not-editable"
-              : message.includes("payment_not_found") ||
-                  message.includes("reservation_not_found")
-                ? "stale-payment"
-                : message.includes("not_authorized") || code === "42501"
-                  ? "not-authorized"
-                  : code === "PGRST202" ||
-                      /could not find the function|schema cache/i.test(message)
-                    ? "payment-delete-migration-required"
-                    : "payment-delete-failed";
+              ? "payment-void-exceeds-total"
+              : message.includes("invalid_void_reason")
+                ? "payment-void-invalid"
+                : message.includes("payment_not_editable") ||
+                    message.includes("reservation_not_editable")
+                  ? "payment-not-editable"
+                  : message.includes("payment_not_found") ||
+                      message.includes("reservation_not_found")
+                    ? "stale-payment"
+                    : message.includes("not_authorized") || code === "42501"
+                      ? "not-authorized"
+                      : code === "PGRST202" ||
+                          /could not find the function|schema cache/i.test(message)
+                        ? "payment-void-migration-required"
+                        : "payment-void-failed";
     redirect("/reservations/" + parsed.data.reservationId + "?error=" + error);
   }
 
@@ -587,12 +607,15 @@ export async function deleteReservationPayment(
   revalidatePath("/reservations/" + targetReservationId);
   revalidatePath("/reservations/" + targetReservationId + "/invoice");
   await logActivity(supabase, {
-    action: "payment_deleted",
+    action: "payment_voided",
     entityType: "reservation",
     entityId: targetReservationId,
-    description: "Removed a payment from the active reservation totals.",
-    metadata: { payment_id: parsed.data.paymentId },
+    description: "Voided a payment from the active reservation totals.",
+    metadata: {
+      payment_id: parsed.data.paymentId,
+      remarks: parsed.data.remarks,
+    },
   });
 
-  redirect("/reservations/" + targetReservationId + "?message=payment-deleted");
+  redirect("/reservations/" + targetReservationId + "?message=payment-voided");
 }

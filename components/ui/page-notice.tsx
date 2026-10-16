@@ -7,9 +7,10 @@ const MESSAGES: Record<string, string> = {
   "all-deleted": "All archived reservations were permanently deleted.",
   "status-paid": "Reservation marked as paid.",
   "status-delivered": "Reservation marked as delivered.",
+  settled: "Payment settled. The order is now listed under Settled Orders.",
   "status-cancelled": "Reservation cancelled and its stock commitment released.",
   "payment-edited": "Payment record corrected. The original entry remains in the audit history.",
-  "payment-deleted": "Payment removed from active totals. The original entry remains in the audit history.",
+  "payment-voided": "Payment voided successfully. The original entry remains in the audit history.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -29,13 +30,16 @@ const ERRORS: Record<string, string> = {
   "payment-not-editable": "This payment or reservation can no longer be changed.",
   "payment-downpayment-committed":
     "This payment cannot be removed because its funds are committed to a release.",
-  "payment-delete-deduction-exceeds-paid":
-    "This payment cannot be removed while a deduction would leave the remaining payment total below zero.",
-  "payment-delete-exceeds-total":
-    "This deduction cannot be removed because it would make total payments exceed the item value.",
-  "payment-delete-migration-required":
-    "Payment removal is not available yet. Apply the latest database migrations, then try again.",
-  "payment-delete-failed": "The payment could not be removed. Please try again.",
+  "payment-void-deduction-exceeds-paid":
+    "This payment cannot be voided because the remaining payment total would go below zero.",
+  "payment-void-downpayment-committed":
+    "This payment cannot be voided because its funds are committed to a release.",
+  "payment-void-exceeds-total":
+    "This payment cannot be voided because it would make total payments exceed the item value.",
+  "payment-void-invalid": "Enter a valid reason before voiding this payment.",
+  "payment-void-migration-required":
+    "Payment voiding is not available yet. Apply the latest database migration, then try again.",
+  "payment-void-failed": "The payment could not be voided. Please try again.",
 };
 
 export function PageNotice({

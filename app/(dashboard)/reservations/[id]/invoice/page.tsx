@@ -237,7 +237,10 @@ export default async function ReservationInvoicePage({
             reservationId={reservation.id}
             reservationNo={reservation.reservation_no}
             items={releaseItems}
-            availableDownpayment={remainingUnapplied}
+            availableDownpayment={Math.max(
+              downpaymentAmount - downpaymentCommitted,
+              0,
+            )}
             canRelease={
               canWrite &&
               !reservation.archived_at &&

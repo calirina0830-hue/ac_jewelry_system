@@ -60,11 +60,16 @@ export const editPaymentSchema = paymentEntrySchema.extend({
   expectedPaymentRecordedAt: z.iso.datetime({ offset: true }),
 });
 
-export const deletePaymentSchema = z.object({
+export const voidPaymentSchema = z.object({
   paymentId: z.string().uuid(),
   reservationId: z.string().uuid(),
   expectedUpdatedAt: z.iso.datetime({ offset: true }),
   expectedPaymentRecordedAt: z.iso.datetime({ offset: true }),
+  remarks: z
+    .string()
+    .trim()
+    .min(3, "Enter a reason for voiding this payment.")
+    .max(1000, "Void remarks are too long."),
 });
 
 export const paymentEvidenceMetadataSchema = z

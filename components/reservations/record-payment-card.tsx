@@ -23,21 +23,27 @@ export type RecordPaymentReservation = {
 export function RecordPaymentCard({
   reservation,
   customer,
+  settlementBalance,
 }: {
   reservation: RecordPaymentReservation;
   customer: RecordPaymentCustomer;
+  settlementBalance?: number;
 }) {
   const transaction = reservation.transaction;
+  const amountDue = settlementBalance ?? transaction.remainingBalance;
   const [amount, setAmount] = useState(() =>
-    transaction.remainingBalance.toFixed(2),
+    amountDue.toFixed(2),
   );
   const parsed = Number(amount);
   const payment = Number.isFinite(parsed) ? parsed : 0;
   const projectedPaidTowardRemaining = transaction.paidTowardRemaining + payment;
-  const remainingAfterPayment = Math.max(
-    transaction.remainingItemsTotal - projectedPaidTowardRemaining,
-    0,
-  );
+  const remainingAfterPayment =
+    settlementBalance === undefined
+      ? Math.max(
+          transaction.remainingItemsTotal - projectedPaidTowardRemaining,
+          0,
+        )
+      : Math.max(amountDue - payment, 0);
 
   return (
     <section className="rounded-3xl border border-border bg-white p-6 shadow-card">
@@ -55,37 +61,65 @@ export function RecordPaymentCard({
             </p>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4 text-right sm:grid-cols-4">
-          <div>
-            <p className="text-xs text-muted">Original transaction</p>
-            <p className="mt-1 text-sm font-bold text-ink">
-              {formatCurrency(transaction.originalTotal)}
-            </p>
+        {settlementBalance === undefined ? (
+          <div className="grid grid-cols-2 gap-4 text-right sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted">Original transaction</p>
+              <p className="mt-1 text-sm font-bold text-ink">
+                {formatCurrency(transaction.originalTotal)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted">Amount items to be paid</p>
+              <p className="mt-1 text-sm font-bold text-ink">
+                {formatCurrency(transaction.remainingItemsTotal)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted">Total paid</p>
+              <p className="mt-1 text-sm font-bold text-ink">
+                {formatCurrency(transaction.totalPaid)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted">
+                {transaction.paymentCount} active payment record{transaction.paymentCount === 1 ? "" : "s"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted">Remaining to pay</p>
+              <p className="mt-1 text-lg font-black text-ink">
+                {formatCurrency(amountDue)}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-muted">Amount items to be paid</p>
-            <p className="mt-1 text-sm font-bold text-ink">
-              {formatCurrency(transaction.remainingItemsTotal)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted">Total paid</p>
-            <p className="mt-1 text-sm font-bold text-ink">
-              {formatCurrency(transaction.totalPaid)}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted">
-              {transaction.paymentCount} active payment record{transaction.paymentCount === 1 ? "" : "s"}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted">Remaining to pay</p>
-            <p className="mt-1 text-lg font-black text-ink">
-              {formatCurrency(transaction.remainingBalance)}
-            </p>
-          </div>
-        </div>
+        ) : (
+          <dl className="grid gap-4 text-right sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted">Order total</dt>
+              <dd className="mt-1 text-sm font-bold text-ink">
+                {formatCurrency(transaction.originalTotal)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted">Total Paid</dt>
+              <dd className="mt-1 text-sm font-bold text-ink">
+                {formatCurrency(transaction.totalPaid)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted">Balance due</dt>
+              <dd className="mt-1 text-lg font-black text-emerald-700">
+                {formatCurrency(amountDue)}
+              </dd>
+            </div>
+          </dl>
+        )}
       </div>
-      <div className="mt-5 overflow-hidden rounded-2xl border border-border">
+      {settlementBalance !== undefined && (
+        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+          Enter the balance due to complete this order.
+        </div>
+      )}
+      {settlementBalance === undefined && <div className="mt-5 overflow-hidden rounded-2xl border border-border">
         <div className="border-b border-border bg-canvas px-4 py-3">
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">
             Items still requiring payment
@@ -123,7 +157,7 @@ export function RecordPaymentCard({
           <Summary label="Applied to releases" value={transaction.appliedToReleases} />
           <Summary label="Paid toward remaining" value={transaction.paidTowardRemaining} />
         </dl>
-      </div>
+      </div>}
       <input
         name={"updatedAt:" + reservation.id}
         type="hidden"
@@ -131,11 +165,11 @@ export function RecordPaymentCard({
       />
       <div className="mt-5 grid gap-5 md:grid-cols-2">
         <label className="block text-sm font-semibold text-ink">
-          Payment amount
+          {settlementBalance === undefined ? "Payment amount" : "Settlement amount"}
           <input
             className="mt-2 h-11 w-full rounded-xl border border-border px-4 font-normal outline-none focus:border-gold"
             inputMode="decimal"
-            max={transaction.remainingBalance.toFixed(2)}
+            max={amountDue.toFixed(2)}
             name={"amount:" + reservation.id}
             onChange={(event) => setAmount(event.target.value)}
             required

@@ -59,8 +59,10 @@ const BULK_RESERVATION_FORM_ID = "bulk-reservation-form";
 
 const STATUS_TABS = [
   { value: "reserved", label: "Reserved" },
+  { value: "partially-paid", label: "Partially Paid" },
   { value: "paid", label: "Paid" },
   { value: "delivered", label: "Delivered" },
+  { value: "settled", label: "Settled Orders" },
   { value: "cancelled", label: "Cancelled" },
 ] as const;
 
@@ -98,10 +100,25 @@ function getEmptyStateConfig(status: string, archive: string, canWrite: boolean,
         actionHref: undefined,
         actionLabel: undefined,
       };
+    case "partially-paid":
+      return {
+        title: "No partially paid orders",
+        description:
+          "There are no orders with an active payment and a remaining balance.",
+        actionHref: undefined,
+        actionLabel: undefined,
+      };
     case "delivered":
       return {
         title: "No delivered orders",
         description: "There are no delivered orders matching the current filters.",
+        actionHref: undefined,
+        actionLabel: undefined,
+      };
+    case "settled":
+      return {
+        title: "No settled orders",
+        description: "There are no delivered orders with a zero balance yet.",
         actionHref: undefined,
         actionLabel: undefined,
       };
@@ -150,14 +167,23 @@ export default async function ReservationsPage({
   searchParams,
 }: ReservationsPageProps) {
   const rawParams = await searchParams;
-  const [profile, supabase, cookieStore] = await Promise.all([
-    getCurrentProfile(),
+  // Start authentication immediately, but do not put it on the critical path
+  // for an ordinary list request. The profile is only required up front when
+  // a private search cookie must be checked against its owner.
+  const profilePromise = getCurrentProfile();
+  const [supabase, cookieStore] = await Promise.all([
     createClient(),
     cookies(),
   ]);
+  const privateSearchCookie = cookieStore.get(
+    PRIVATE_SEARCH_COOKIE_NAMES.reservations,
+  )?.value;
+  const profileForPrivateSearch = privateSearchCookie
+    ? await profilePromise
+    : null;
   const search = readPrivateSearchTerm(
-    cookieStore.get(PRIVATE_SEARCH_COOKIE_NAMES.reservations)?.value,
-    profile?.id,
+    privateSearchCookie,
+    profileForPrivateSearch?.id,
   );
   const filters = reservationQuerySchema.parse({ ...rawParams, q: search });
   if (rawParams.q !== undefined) {
@@ -176,33 +202,91 @@ export default async function ReservationsPage({
         }).toString(),
     );
   }
-  const canWrite = roleCanWrite(profile?.role);
-  const isAdmin = roleIsAdmin(profile?.role);
-
   const isAll = filters.pageSize === "all";
   const limit = isAll ? null : Number(filters.pageSize);
   const from = isAll ? 0 : (filters.page - 1) * (limit ?? PAGE_SIZE);
   const to = isAll ? undefined : from + (limit ?? PAGE_SIZE) - 1;
+  const isDeliveredView =
+    filters.status === "delivered" || filters.status === "settled";
+
+  // Start independent classification and item-search reads together so the
+  // main reservation query does not wait for them one after another.
+  const classificationPromise =
+    isDeliveredView ||
+    filters.status === "reserved" ||
+    filters.status === "partially-paid"
+      ? supabase.rpc(
+          isDeliveredView
+            ? "get_fully_delivered_reservation_ids"
+            : "get_partially_paid_reservation_ids",
+        )
+      : Promise.resolve({ data: null, error: null });
+  const itemMatchPromise = search
+    ? supabase
+        .from("reservation_items")
+        .select("reservation_id")
+        .or(
+          "sku.ilike.%" +
+            search +
+            "%,item_name.ilike.%" +
+            search +
+            "%",
+        )
+    : Promise.resolve({ data: [] as Array<{ reservation_id: string }> });
+  const [classificationResult, itemMatchResult] = await Promise.all([
+    classificationPromise,
+    itemMatchPromise,
+  ]);
+  const classificationIds = classificationResult.data;
+  const classificationError = classificationResult.error;
+  const classificationIdList = classificationIds ?? [];
+  const itemMatchIds = [
+    ...new Set((itemMatchResult.data ?? []).map((item) => item.reservation_id)),
+  ];
 
   let query = supabase.from("reservation_list").select("*", { count: "exact" });
 
-  if (filters.status === "delivered") {
-    // Include reservations with delivered_at or that have shipped shipments
-    const { data: shippedShipments } = await supabase
-      .from("reservation_shipments")
-      .select("reservation_id")
-      .eq("status", "shipped");
-    const shippedResIds = [
-      ...new Set((shippedShipments ?? []).map((s) => s.reservation_id)),
-    ];
-    let condition = "delivered_at.not.is.null";
-    if (shippedResIds.length > 0) {
-      condition += ",id.in.(" + shippedResIds.join(",") + ")";
+  if (isDeliveredView) {
+    // Delivered means every item has been released. A first release sets
+    // delivered_at, but partially released orders remain in Partially Paid.
+    query = query.in(
+      "id",
+      classificationIdList.length > 0
+        ? classificationIdList
+        : ["00000000-0000-0000-0000-000000000000"],
+    );
+    if (filters.status === "settled") {
+      query = query.eq("balance", 0);
     }
-    query = query.or(condition);
   } else if (filters.status === "reserved") {
-    query = query.eq("status", "reserved");
-  } else if (filters.status !== "all") {
+    query = query.eq("status", "reserved").is("delivered_at", null);
+    if (classificationIdList.length > 0) {
+      query = query.not(
+        "id",
+        "in",
+        "(" +
+          classificationIdList.map((id) => '"' + id + '"').join(",") +
+          ")",
+      );
+    }
+  } else if (filters.status === "partially-paid") {
+    // Partial payment is a derived state: the reservation must still be
+    // Reserved, have an active payment, and retain a balance.
+    query = query
+      .eq("status", "reserved")
+      .gt("balance", 0)
+      .in(
+        "id",
+        classificationError || classificationIdList.length === 0
+          ? ["00000000-0000-0000-0000-000000000000"]
+          : classificationIdList,
+      );
+  } else if (filters.status === "paid") {
+    // Delivery is tracked independently from the financial status. A delivered
+    // reservation can therefore still have status = "paid"; keep it out of
+    // the Paid tab once its delivery timestamp has been recorded.
+    query = query.eq("status", "paid").is("delivered_at", null);
+  } else if (filters.status === "cancelled") {
     query = query.eq("status", filters.status);
   }
 
@@ -219,7 +303,7 @@ export default async function ReservationsPage({
   const operationalDateColumn =
     filters.status === "paid"
       ? "paid_at"
-      : filters.status === "delivered"
+      : isDeliveredView
         ? "delivered_at"
         : filters.status === "cancelled"
           ? "cancelled_at"
@@ -240,23 +324,6 @@ export default async function ReservationsPage({
     );
   }
 
-  let itemMatchIds: string[] = [];
-  if (search) {
-    const { data: itemMatches } = await supabase
-      .from("reservation_items")
-      .select("reservation_id")
-      .or(
-        "sku.ilike.%" +
-          search +
-          "%,item_name.ilike.%" +
-          search +
-          "%",
-      );
-    itemMatchIds = [
-      ...new Set((itemMatches ?? []).map((item) => item.reservation_id)),
-    ];
-  }
-
   if (search) {
     const pattern = "%" + search + "%";
     let condition =
@@ -273,9 +340,15 @@ export default async function ReservationsPage({
   }
 
   const orderedQuery = query.order(sortColumn, { ascending: filters.direction === "asc" });
-  const { data: reservations, count, error } = isAll
-    ? await orderedQuery.limit(2000)
-    : await orderedQuery.range(from, to ?? from + PAGE_SIZE - 1);
+  const reservationsPromise = isAll
+    ? orderedQuery.limit(2000)
+    : orderedQuery.range(from, to ?? from + PAGE_SIZE - 1);
+  const [
+    { data: reservations, count, error },
+    profile,
+  ] = await Promise.all([reservationsPromise, profilePromise]);
+  const canWrite = roleCanWrite(profile?.role);
+  const isAdmin = roleIsAdmin(profile?.role);
 
   const reservationIds = (reservations ?? []).map(
     (reservation) => reservation.id,
@@ -301,7 +374,9 @@ export default async function ReservationsPage({
         .order("created_at"),
       supabase
         .from("reservation_shipments")
-        .select("id, reservation_id, status, downpayment_applied")
+        .select(
+          "id, reservation_id, status, downpayment_applied, reservation_shipment_items(reservation_item_id, quantity)",
+        )
         .in("reservation_id", reservationIds)
         .eq("status", "shipped"),
       supabase
@@ -320,8 +395,6 @@ export default async function ReservationsPage({
     }
 
     const shippedResIds = new Set((shipments ?? []).map((s) => s.reservation_id));
-    const shipmentIds = (shipments ?? []).map((s) => s.id);
-
     for (const s of shipments ?? []) {
       downpaymentAppliedByReservation.set(
         s.reservation_id,
@@ -330,16 +403,12 @@ export default async function ReservationsPage({
     }
 
     const shippedByItem = new Map<string, number>();
-    if (shipmentIds.length > 0) {
-      const { data: shipmentItems } = await supabase
-        .from("reservation_shipment_items")
-        .select("reservation_item_id, quantity")
-        .in("shipment_id", shipmentIds);
-
-      for (const si of shipmentItems ?? []) {
+    for (const shipment of shipments ?? []) {
+      for (const shipmentItem of shipment.reservation_shipment_items ?? []) {
         shippedByItem.set(
-          si.reservation_item_id,
-          (shippedByItem.get(si.reservation_item_id) ?? 0) + Number(si.quantity),
+          shipmentItem.reservation_item_id,
+          (shippedByItem.get(shipmentItem.reservation_item_id) ?? 0) +
+            Number(shipmentItem.quantity),
         );
       }
     }
@@ -375,18 +444,20 @@ export default async function ReservationsPage({
       // Keep a partially released line visible while it still has an unreleased
       // quantity, but remove it once the full line has shipped.
       if (
-        (filters.status === "reserved" || filters.status === "paid") &&
+        (filters.status === "reserved" ||
+          filters.status === "partially-paid" ||
+          filters.status === "paid") &&
         remainingQty <= 0
       ) {
         continue;
       }
-      // On 'delivered' status tab:
-      // If shipments were recorded for this reservation, only include items that were shipped (shippedQty > 0).
-      // If no shipment records exist, only include items if the reservation itself is marked 'delivered'.
-      if (filters.status === "delivered") {
+      // On the Delivered tab, show released items for an explicitly delivered
+      // reservation. For a delivered reservation without shipment records,
+      // retain the reservation items as the delivered record.
+      if (isDeliveredView) {
         if (shippedResIds.has(item.reservation_id)) {
           if (shippedQty <= 0) continue;
-        } else if (resMap.get(item.reservation_id)?.status !== "delivered") {
+        } else if (resMap.get(item.reservation_id)?.delivered_at == null) {
           continue;
         }
       }
@@ -410,7 +481,9 @@ export default async function ReservationsPage({
   const bulkEnabled =
     filters.archive === "active" &&
     canWrite &&
-    (filters.status === "reserved" || filters.status === "paid");
+    (filters.status === "reserved" ||
+      filters.status === "partially-paid" ||
+      filters.status === "paid");
   const queryValues = {
     liveBatch: filters.liveBatch || undefined,
     fromDate: filters.fromDate || undefined,
@@ -423,7 +496,7 @@ export default async function ReservationsPage({
   };
   const visibleReservations = (reservations ?? []).filter(
     (reservation) =>
-      filters.status !== "paid" ||
+      (filters.status !== "paid" && filters.status !== "partially-paid") ||
       (itemsByReservation.get(reservation.id)?.length ?? 0) > 0,
   );
   const bulkSelectionRows = bulkEnabled
@@ -450,6 +523,16 @@ export default async function ReservationsPage({
 
   const customerGroups: CustomerGroup[] = [];
   const groupIndexByKey = new Map<string, number>();
+  const customerGroupKeyById = new Map<string, string>();
+  const customerGroupKeyByIdentity = new Map<string, string>();
+
+  function normalizeCustomerPart(value: string | null | undefined) {
+    return (value ?? "")
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase();
+  }
 
   for (const reservation of visibleReservations) {
     let resTotal = Number(reservation.total);
@@ -457,21 +540,29 @@ export default async function ReservationsPage({
     let resDownpayment = 0;
     let resBalance = Number(reservation.balance);
 
-    if (filters.status === "delivered") {
+    if (isDeliveredView) {
       // In delivered view: if this reservation had partial releases, show the released goods value,
       // the downpayment applied to those released shipments, and the remaining balance on them.
       const hasShipments = downpaymentAppliedByReservation.has(reservation.id) || (releasedValueByReservation.get(reservation.id) ?? 0) > 0;
       resDownpayment = downpaymentAppliedByReservation.get(reservation.id) ?? 0;
       if (hasShipments) {
         resTotal = releasedValueByReservation.get(reservation.id) ?? 0;
-        resPaid = resDownpayment;
-        resBalance = Math.max(resTotal - resPaid, 0);
-      } else if (reservation.status !== "delivered") {
-        // If it was fetched because of delivered_at on another row or sibling, but this reservation
-        // itself has no released items and is not delivered, don't include it in delivered view.
+        if (filters.status === "settled") {
+          resPaid = resTotal;
+          resBalance = 0;
+        } else {
+          resPaid = resDownpayment;
+          resBalance = Math.max(resTotal - resPaid, 0);
+        }
+      } else if (reservation.delivered_at == null) {
+        // A reservation without released items still belongs in Delivered only
+        // when the user explicitly marked that reservation as delivered.
         continue;
       }
-    } else if (filters.status === "reserved") {
+    } else if (
+      filters.status === "reserved" ||
+      filters.status === "partially-paid"
+    ) {
       // In reserved view: if items were partially released, show the remaining items value,
       // unapplied downpayment, and balance due on remaining items.
       const hasShipments = downpaymentAppliedByReservation.has(reservation.id) || (releasedValueByReservation.get(reservation.id) ?? 0) > 0;
@@ -487,11 +578,36 @@ export default async function ReservationsPage({
     // customer. Delivered, Cancelled, All, and Archive keep transaction rows
     // separate so their existing release/history behavior does not change.
     const compileByCustomer =
-      filters.status === "reserved" || filters.status === "paid";
-    const normalizedKey =
-      compileByCustomer
-        ? "customer:" + reservation.customer_id
-        : reservation.id;
+      filters.status === "reserved" ||
+      filters.status === "partially-paid" ||
+      filters.status === "paid";
+    let normalizedKey = reservation.id;
+    if (compileByCustomer) {
+      const customerIdKey = "customer:" + reservation.customer_id;
+      const customerName = normalizeCustomerPart(reservation.customer_name);
+      const customerPhone = normalizeCustomerPart(reservation.customer_phone).replace(
+        /\D/g,
+        "",
+      );
+      const customerIdentityKey =
+        customerName && customerPhone
+          ? "identity:" + customerName + ":" + customerPhone
+          : null;
+
+      // Keep the customer id as the primary identity. The name-and-phone
+      // fallback only connects duplicate customer records when both fields
+      // match exactly after normalization.
+      normalizedKey =
+        customerGroupKeyById.get(reservation.customer_id) ??
+        (customerIdentityKey
+          ? customerGroupKeyByIdentity.get(customerIdentityKey)
+          : undefined) ??
+        customerIdKey;
+      customerGroupKeyById.set(reservation.customer_id, normalizedKey);
+      if (customerIdentityKey) {
+        customerGroupKeyByIdentity.set(customerIdentityKey, normalizedKey);
+      }
+    }
 
     const existingIndex = groupIndexByKey.get(normalizedKey);
     if (existingIndex !== undefined) {
@@ -523,7 +639,8 @@ export default async function ReservationsPage({
     }
   }
 
-  const showingCount = visibleReservations.length;
+  const reservationRecordCount = visibleReservations.length;
+  const tableRowCount = customerGroups.length;
 
   return (
     <div className="mx-auto max-w-[1550px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -642,10 +759,10 @@ export default async function ReservationsPage({
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-muted">
         <div>
-          Showing <strong className="text-ink">{showingCount}</strong> of{" "}
+          Showing <strong className="text-ink">{tableRowCount}</strong> of{" "}
           <strong className="text-ink">{totalCount}</strong> matching reservation{totalCount === 1 ? "" : "s"}
-          {customerGroups.length > 0 && customerGroups.length !== showingCount && (
-            <span> (grouped under <strong className="text-ink">{customerGroups.length}</strong> customer{customerGroups.length === 1 ? "" : "s"})</span>
+          {reservationRecordCount !== tableRowCount && (
+            <span> ({reservationRecordCount} reservation record{reservationRecordCount === 1 ? "" : "s"} grouped on this page)</span>
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -710,7 +827,7 @@ export default async function ReservationsPage({
                     <th className="px-5 py-4 font-bold">Item</th>
                     <th className="px-5 py-4 font-bold">Total</th>
                     <th className="px-5 py-4 font-bold">Total Paid</th>
-                    {filters.status === "delivered" && (
+                    {isDeliveredView && (
                       <th className="px-5 py-4 font-bold">Downpayment</th>
                     )}
                     <th className="px-5 py-4 font-bold">Balance</th>
@@ -736,13 +853,6 @@ export default async function ReservationsPage({
                     // Compile items from all reservations for this customer
                     const combinedItems = group.items.flatMap(
                       (reservation) => itemsByReservation.get(reservation.id) ?? [],
-                    );
-                    // Determine if any reservation in the group is partially paid
-                    const hasPartiallyPaid = group.items.some(
-                      (r) =>
-                        r.status === "reserved" &&
-                        (activePaidByReservation.get(r.id) ?? 0) > 0 &&
-                        Number(r.balance) > 0,
                     );
                     // Determine consolidated status
                     const allSameStatus = group.items.every(
@@ -809,11 +919,6 @@ export default async function ReservationsPage({
                               ? "Facebook / CS: " + group.facebookName
                               : group.phone ?? "No Facebook / CS name"}
                           </p>
-                          {hasPartiallyPaid && (
-                            <span className="mt-1 inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
-                              Partially Paid
-                            </span>
-                          )}
                         </td>
                         <td className="px-5 py-4">
                           <ReservationItemCell items={combinedItems} />
@@ -838,6 +943,14 @@ export default async function ReservationsPage({
                               archived={allArchived}
                               status="delivered"
                             />
+                          ) : filters.status === "settled" ? (
+                            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                              Settled
+                            </span>
+                          ) : filters.status === "partially-paid" ? (
+                            <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
+                              Partially Paid
+                            </span>
                           ) : allSameStatus ? (
                             <ReservationStatus
                               archived={allArchived}
@@ -865,17 +978,25 @@ export default async function ReservationsPage({
                                       href={
                                         "/reservations/" +
                                         reservation.id +
-                                        (filters.status === "delivered" ? "?view=delivered" : "")
+                                        (isDeliveredView ? "?view=delivered" : "")
                                       }
                                     >
-                                      {filters.status === "delivered" ? "View order" : "View Reservation"}
+                                      {isDeliveredView ? "View order" : "View Reservation"}
                                     </Link>
-                                    {filters.status !== "delivered" && (
+                                    {!isDeliveredView && (
                                       <Link className="text-gold-dark" href={"/reservations/" + reservation.id + "/invoice"}>
                                         View Invoice
                                       </Link>
                                     )}
-                                    {filters.status !== "delivered" && (
+                                    {filters.status === "delivered" && canWrite && !reservation.archived_at && reservation.status === "reserved" && Number(reservation.balance) > 0 && (
+                                      <>
+                                        <ReservationActionsSeparator />
+                                        <Link className="text-emerald-700" href={"/reservations/bulk/pay?ids=" + reservation.id + "&mode=settle"}>
+                                          Settle Payment
+                                        </Link>
+                                      </>
+                                    )}
+                                    {!isDeliveredView && (
                                       <>
                                         {!reservation.archived_at &&
                                           ((canWrite && reservation.status === "reserved") ||
@@ -981,7 +1102,8 @@ export default async function ReservationsPage({
                   </p>
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                     <BulkSelectionCount />
-                    {filters.status === "reserved" && (
+                    {(filters.status === "reserved" ||
+                      filters.status === "partially-paid") && (
                       <>
                         <BulkReviewButton destination="pay">
                           Record payments

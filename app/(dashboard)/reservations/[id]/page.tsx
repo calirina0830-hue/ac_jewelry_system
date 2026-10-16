@@ -7,7 +7,6 @@ import {
   restoreReservation,
   transitionReservationStatus,
 } from "@/actions/reservations";
-import { deleteReservationPayment } from "@/actions/payments";
 import { OrderDateEditor } from "@/components/reservations/order-date-editor";
 import { EditPaymentRecord } from "@/components/reservations/edit-payment-record";
 import {
@@ -16,8 +15,10 @@ import {
 } from "@/components/reservations/payment-edit-history";
 import { PaymentEvidenceViewer } from "@/components/reservations/payment-evidence-viewer";
 import { ReleaseStatusBadge } from "@/components/reservations/release-status";
+import { ReleaseRecordActions } from "@/components/reservations/release-record-actions";
 import { ReservationStatus } from "@/components/reservations/reservation-status";
 import { ShippingPanel } from "@/components/reservations/shipping-panel";
+import { VoidPaymentRecord } from "@/components/reservations/void-payment-record";
 import { StockImage } from "@/components/stock/stock-image";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { PageHeader } from "@/components/ui/page-header";
@@ -103,7 +104,7 @@ export default async function ReservationDetailsPage({
       .order("recorded_at", { ascending: false }),
     supabase
       .from("reservation_shipments")
-      .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason")
+      .select("id, shipment_no, status, created_at, shipped_at, downpayment_applied, notes, cancel_reason, updated_at, correction_reason, corrected_at")
       .eq("reservation_id", reservation.id)
       .order("created_at", { ascending: false }),
     reservation.created_by
@@ -258,10 +259,12 @@ export default async function ReservationDetailsPage({
       status: shipment.status,
       createdAt: shipment.created_at,
       shippedAt: shipment.shipped_at,
+      updatedAt: shipment.updated_at,
       itemCount: aggregate.itemCount,
       totalQuantity: aggregate.totalQuantity,
       downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
       notes: shipment.notes,
+      correctionReason: shipment.correction_reason,
       cancelReason: shipment.cancel_reason,
     };
   });
@@ -290,7 +293,6 @@ export default async function ReservationDetailsPage({
     deliveredItemSubtotal - deliveredReservationDiscount,
     0,
   );
-  const deliveredBalance = Math.max(deliveredSubtotal - usedDownpayment, 0);
   const deliveredQuantity = deliveredItems.reduce(
     (total, item) => total + item.displayQuantity,
     0,
@@ -385,6 +387,16 @@ export default async function ReservationDetailsPage({
   const activePaymentTotal = (payments ?? [])
     .filter((payment) => !payment.voided_at)
     .reduce((total, payment) => total + Number(payment.amount), 0);
+  // Delivered balances must include final settlement payments, not only the
+  // downpayment allocated to the release shipments.
+  const deliveredPaidAmount = Math.min(
+    Math.max(activePaymentTotal, 0),
+    deliveredSubtotal,
+  );
+  const deliveredBalance = Math.max(
+    deliveredSubtotal - deliveredPaidAmount,
+    0,
+  );
   const paymentTransaction = calculatePaymentTransactionSummary({
     originalTotal: Number(reservation.total),
     reservationDiscount: Number(reservation.discount),
@@ -417,7 +429,7 @@ export default async function ReservationDetailsPage({
   );
   const downpaymentAmount = Number(reservation.downpayment);
   const displayedPaidAmount = isDeliveredView
-    ? usedDownpayment
+    ? deliveredPaidAmount
     : activePaymentTotal;
   const combinedSubtotal = paymentTransaction.remainingItemsSubtotal;
   const combinedDiscount = paymentTransaction.remainingReservationDiscount;
@@ -611,7 +623,14 @@ export default async function ReservationDetailsPage({
             </div>
             {isDeliveredView && (
               <DeliveredRecords
-                shipments={shipmentRows.filter((shipment) => shipment.status === "shipped")}
+                shipments={shipmentRows.filter(
+                  (shipment): shipment is (typeof shipmentRows)[number] & {
+                    status: "shipped" | "cancelled";
+                  } => shipment.status !== "pending",
+                )}
+                canWrite={canWrite}
+                isAdmin={isAdmin}
+                reservationId={reservation.id}
               />
             )}
           </section>
@@ -734,21 +753,13 @@ export default async function ReservationDetailsPage({
                                 referenceNo={payment.reference_no}
                                 notes={payment.notes}
                               />
-                              <ConfirmAction
-                                action={deleteReservationPayment.bind(
-                                  null,
-                                  payment.id,
-                                  reservation.id,
-                                  payment.recorded_at,
-                                  reservation.updated_at,
-                                )}
-                                appearance="compact-danger"
-                                confirmation={
-                                  "Remove this payment from active totals? Its record and evidence will remain in the audit history, and the reservation balance may increase."
-                                }
-                              >
-                                Delete
-                              </ConfirmAction>
+                              <VoidPaymentRecord
+                                amount={Number(payment.amount)}
+                                paymentId={payment.id}
+                                paymentRecordedAt={payment.recorded_at}
+                                reservationId={reservation.id}
+                                reservationUpdatedAt={reservation.updated_at}
+                              />
                             </>
                           )}
                         </div>
@@ -767,14 +778,16 @@ export default async function ReservationDetailsPage({
                         <RecordItem label="Reference number" value={payment.reference_no ?? "Not provided"} />
                         <RecordItem label="Notes" value={payment.notes ?? "No notes"} />
                         {payment.voided_at && (
-                          <RecordItem
-                            label="Void audit"
-                            value={
-                              formatDateTime(payment.voided_at) +
-                              " · " +
-                              (payment.void_reason ?? "No reason")
-                            }
-                          />
+                          <>
+                            <RecordItem
+                              label="Voided at"
+                              value={formatDateTime(payment.voided_at)}
+                            />
+                            <RecordItem
+                              label="Void remarks"
+                              value={payment.void_reason ?? "No reason provided"}
+                            />
+                          </>
                         )}
                       </dl>
                       <div className="mt-4">
@@ -843,32 +856,47 @@ export default async function ReservationDetailsPage({
             {customer?.facebook_name && (
               <SummaryTextRow label="Facebook / CS" value={customer.facebook_name} />
             )}
-            <SummaryTextRow
-              label={isDeliveredView ? "Delivered quantity" : "Quantity"}
-              value={String(isDeliveredView ? deliveredQuantity : remainingQuantity)}
-            />
-            <MoneyRow
-              label={isDeliveredView ? "Delivered item subtotal" : "Subtotal"}
-              value={isDeliveredView ? deliveredItemSubtotal : combinedSubtotal}
-            />
-            <MoneyRow
-              label={isDeliveredView ? "Allocated reservation discount" : "Reservation discount"}
-              value={isDeliveredView ? deliveredReservationDiscount : combinedDiscount}
-            />
-            <MoneyRow
-              label={isDeliveredView ? "Delivered total" : "Total"}
-              strong
-              value={isDeliveredView ? deliveredSubtotal : combinedTotal}
-            />
-            <MoneyRow
-              label={isDeliveredView ? "Downpayment applied" : "Total Paid"}
-              value={displayedPaidAmount}
-            />
-            <MoneyRow
-              label={isDeliveredView ? "Balance on delivered items" : "Remaining Balance"}
-              strong
-              value={isDeliveredView ? deliveredBalance : combinedBalance}
-            />
+            {isDeliveredView ? (
+              <>
+                <SummaryTextRow
+                  label="Delivered quantity"
+                  value={String(deliveredQuantity)}
+                />
+                <MoneyRow
+                  label="Delivered total"
+                  strong
+                  value={deliveredSubtotal}
+                />
+                <MoneyRow
+                  label="Paid so far"
+                  value={displayedPaidAmount}
+                />
+                <MoneyRow
+                  label="Balance due"
+                  strong
+                  value={deliveredBalance}
+                />
+              </>
+            ) : (
+              <>
+                <SummaryTextRow
+                  label="Quantity"
+                  value={String(remainingQuantity)}
+                />
+                <MoneyRow label="Subtotal" value={combinedSubtotal} />
+                <MoneyRow
+                  label="Reservation discount"
+                  value={combinedDiscount}
+                />
+                <MoneyRow label="Total" strong value={combinedTotal} />
+                <MoneyRow label="Total Paid" value={displayedPaidAmount} />
+                <MoneyRow
+                  label="Remaining Balance"
+                  strong
+                  value={combinedBalance}
+                />
+              </>
+            )}
             {!isDeliveredView && reservation.status === "reserved" &&
               displayedPaidAmount > 0 &&
               Number(combinedBalance) > 0 && (
@@ -936,22 +964,33 @@ export default async function ReservationDetailsPage({
 
 function DeliveredRecords({
   shipments,
+  canWrite,
+  isAdmin,
+  reservationId,
 }: {
   shipments: Array<{
     id: string;
     shipmentNo: string;
+    status: "shipped" | "cancelled";
     createdAt: string;
     shippedAt: string | null;
+    updatedAt: string;
     totalQuantity: number;
     downpaymentApplied: number;
+    notes: string | null;
+    correctionReason: string | null;
+    cancelReason: string | null;
   }>;
+  canWrite: boolean;
+  isAdmin: boolean;
+  reservationId: string;
 }) {
   return (
     <div className="border-t border-border px-6 py-5 sm:px-8">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-gold-dark">
         Deliveries
       </p>
-      <h2 className="mt-1 font-serif text-2xl text-ink">Delivery records</h2>
+      <h2 className="mt-1 font-serif text-2xl text-ink">Delivery and correction history</h2>
       {shipments.length ? (
         <div className="mt-5 space-y-3">
           {shipments.map((shipment) => (
@@ -960,17 +999,48 @@ function DeliveredRecords({
               key={shipment.id}
             >
               <div>
-                <p className="font-bold text-ink">{shipment.shipmentNo}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-bold text-ink">{shipment.shipmentNo}</p>
+                  {shipment.status === "cancelled" && (
+                    <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700">
+                      Voided
+                    </span>
+                  )}
+                </div>
                 <p className="mt-1 text-sm text-muted">
-                  {shipment.totalQuantity} delivered unit{shipment.totalQuantity === 1 ? "" : "s"}
+                  {shipment.status === "shipped"
+                    ? `${shipment.totalQuantity} delivered unit${shipment.totalQuantity === 1 ? "" : "s"}`
+                    : "Release was voided"}
                   {" · "}
                   {formatDateTime(shipment.shippedAt ?? shipment.createdAt)}
                 </p>
-                <p className="mt-1 text-sm font-semibold text-ink">
-                  Downpayment applied: {formatCurrency(shipment.downpaymentApplied)}
-                </p>
+                {shipment.status === "shipped" && (
+                  <p className="mt-1 text-sm font-semibold text-ink">
+                    Downpayment applied: {formatCurrency(shipment.downpaymentApplied)}
+                  </p>
+                )}
+                {shipment.correctionReason && (
+                  <p className="mt-1 text-xs text-muted">
+                    Correction remarks: {shipment.correctionReason}
+                  </p>
+                )}
+                {shipment.cancelReason && (
+                  <p className="mt-1 text-xs text-red-700">
+                    Void remarks: {shipment.cancelReason}
+                  </p>
+                )}
               </div>
-              <div className="flex flex-wrap items-center gap-4">
+              {shipment.status === "shipped" && <div className="flex flex-wrap items-center gap-4">
+                <ReleaseRecordActions
+                  canEdit={canWrite}
+                  canVoid={isAdmin}
+                  notes={shipment.notes}
+                  reservationId={reservationId}
+                  shippedAt={shipment.shippedAt}
+                  shipmentId={shipment.id}
+                  shipmentNo={shipment.shipmentNo}
+                  updatedAt={shipment.updatedAt}
+                />
                 <Link
                   className="text-sm font-bold text-gold-dark hover:underline"
                   href={"/shipments/" + shipment.id + "/pdf?view=inline"}
@@ -985,7 +1055,7 @@ function DeliveredRecords({
                 >
                   Download PDF
                 </Link>
-              </div>
+              </div>}
             </div>
           ))}
         </div>

@@ -159,7 +159,9 @@ export const reservationQuerySchema = z.object({
   liveBatch: z.string().trim().max(120).catch(""),
   fromDate: reservationDateFilterSchema,
   toDate: reservationDateFilterSchema,
-  status: z.enum(["all", ...RESERVATION_STATUSES]).catch("reserved"),
+  status: z
+    .enum(["all", ...RESERVATION_STATUSES, "partially-paid", "settled"])
+    .catch("reserved"),
   archive: z.enum(["active", "archived", "all"]).catch("active"),
   sort: z
     .enum([

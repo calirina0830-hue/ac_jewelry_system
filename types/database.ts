@@ -405,6 +405,9 @@ export type Database = {
           status: "pending" | "shipped" | "cancelled";
           notes: string | null;
           cancel_reason: string | null;
+          correction_reason: string | null;
+          corrected_by: string | null;
+          corrected_at: string | null;
           downpayment_applied: number;
           shipped_at: string | null;
           cancelled_at: string | null;
@@ -419,6 +422,9 @@ export type Database = {
           status?: "pending" | "shipped" | "cancelled";
           notes?: string | null;
           cancel_reason?: string | null;
+          correction_reason?: string | null;
+          corrected_by?: string | null;
+          corrected_at?: string | null;
           downpayment_applied?: MoneyInput;
           shipped_at?: string | null;
           cancelled_at?: string | null;
@@ -429,6 +435,9 @@ export type Database = {
         Update: {
           notes?: string | null;
           cancel_reason?: string | null;
+          correction_reason?: string | null;
+          corrected_by?: string | null;
+          corrected_at?: string | null;
           downpayment_applied?: MoneyInput;
           shipped_at?: string | null;
           cancelled_at?: string | null;
@@ -561,6 +570,14 @@ export type Database = {
       };
     };
     Functions: {
+      get_partially_paid_reservation_ids: {
+        Args: Record<PropertyKey, never>;
+        Returns: string[];
+      };
+      get_fully_delivered_reservation_ids: {
+        Args: Record<PropertyKey, never>;
+        Returns: string[];
+      };
       archive_reservation: {
         Args: { p_reservation_id: string };
         Returns: boolean;
@@ -639,6 +656,7 @@ export type Database = {
           p_payment_id: string;
           p_expected_payment_recorded_at: string;
           p_expected_reservation_updated_at: string;
+          p_void_reason: string;
         };
         Returns: unknown;
       };
@@ -803,6 +821,21 @@ export type Database = {
           shipmentNo: string;
           status: string;
           cancelledAt: string;
+        };
+      };
+      edit_reservation_shipment: {
+        Args: {
+          p_shipment_id: string;
+          p_expected_updated_at: string;
+          p_shipped_at: string;
+          p_notes: string | null;
+          p_correction_reason: string;
+        };
+        Returns: {
+          shipmentId: string;
+          shipmentNo: string;
+          status: string;
+          shippedAt: string;
         };
       };
       confirm_reservation_shipment: {

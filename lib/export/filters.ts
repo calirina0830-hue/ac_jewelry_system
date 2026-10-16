@@ -3,9 +3,10 @@ import type { ReservationStatus } from "@/types/database";
 export type ReservationExportFilter = {
   q: string;
   liveBatch?: string;
-  status: "all" | ReservationStatus;
+  status: "all" | ReservationStatus | "partially-paid" | "settled";
   archive: "active" | "archived" | "all";
   itemMatchIds?: readonly string[];
+  partiallyPaidIds?: readonly string[];
 };
 
 export type ReservationExportSource = {
@@ -14,6 +15,8 @@ export type ReservationExportSource = {
   customer_name: string;
   customer_facebook_name: string | null;
   status: ReservationStatus;
+  balance?: number | string;
+  delivered_at?: string | null;
   archived_at: string | null;
   live_batch?: string | null;
 };
@@ -26,10 +29,20 @@ export function filterReservationExportRows<T extends ReservationExportSource>(
   const itemMatchIds = filters.itemMatchIds
     ? new Set(filters.itemMatchIds)
     : undefined;
+  const partiallyPaidIds = filters.partiallyPaidIds
+    ? new Set(filters.partiallyPaidIds)
+    : undefined;
 
   return rows.filter((row) => {
     const matchesStatus =
-      filters.status === "all" || row.status === filters.status;
+      filters.status === "partially-paid"
+        ? row.status === "reserved" &&
+          Number(row.balance) > 0 &&
+          row.delivered_at == null &&
+          partiallyPaidIds?.has(row.id)
+        : filters.status === "settled"
+          ? row.delivered_at != null && Number(row.balance) === 0
+        : filters.status === "all" || row.status === filters.status;
     const matchesArchive =
       filters.archive === "all" ||
       (filters.archive === "active"

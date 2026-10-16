@@ -30,9 +30,14 @@ const ERROR_MESSAGES: Record<string, string> = {
 export default async function BulkPaymentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ids?: string | string[]; error?: string }>;
+  searchParams: Promise<{
+    ids?: string | string[];
+    error?: string;
+    mode?: string;
+  }>;
 }) {
   const query = await searchParams;
+  const isSettlement = query.mode === "settle";
   const profile = await getCurrentProfile();
   if (!roleCanWrite(profile?.role)) {
     redirect("/reservations?status=reserved&error=not-authorized");
@@ -48,12 +53,16 @@ export default async function BulkPaymentPage({
   const supabase = await createClient();
   const { data: reservations } = await supabase
     .from("reservations")
-    .select("id, reservation_no, customer_id, total, discount, downpayment, balance, pricing_complete, status, archived_at, updated_at")
+    .select("id, reservation_no, customer_id, total, discount, downpayment, balance, pricing_complete, status, archived_at, delivered_at, updated_at")
     .in("id", idsResult.data);
   if (
     !reservations ||
     reservations.length !== idsResult.data.length ||
-    reservations.some((item) => !canRecordReservationPayment(item))
+    reservations.some(
+      (item) =>
+        !canRecordReservationPayment(item) ||
+        (isSettlement && !item.delivered_at),
+    )
   ) {
     redirect("/reservations?status=reserved&error=invalid-bulk-selection");
   }
@@ -68,7 +77,7 @@ export default async function BulkPaymentPage({
   ]);
   const customerById = new Map((customers ?? []).map((item) => [item.id, item]));
   if (
-    reservations.some(
+    !isSettlement && reservations.some(
       (reservation) =>
         (transactionByReservation.get(reservation.id)?.remainingBalance ?? 0) <=
         0,
@@ -82,12 +91,22 @@ export default async function BulkPaymentPage({
   return (
     <div className="mx-auto max-w-5xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
       <PageHeader
-        description="Record a downpayment or another payment for each reservation. Partial balances remain Reserved."
+        description={
+          isSettlement
+            ? "Record the remaining balance for this delivered order."
+            : "Record a downpayment or another payment for each reservation. Partial balances remain Reserved."
+        }
         eyebrow="Reservation payments"
-        title={ordered.length === 1 ? "Record Payment" : "Bulk Payment Review"}
+        title={
+          isSettlement
+            ? "Settle Delivered Order"
+            : ordered.length === 1
+              ? "Record Payment"
+              : "Bulk Payment Review"
+        }
       >
-        <Link className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold" href="/reservations?status=reserved">
-          Back to Reserved
+        <Link className="inline-flex h-11 items-center rounded-xl border border-border bg-white px-5 text-sm font-semibold text-ink hover:border-gold" href={isSettlement ? "/reservations?status=delivered" : "/reservations?status=reserved"}>
+          {isSettlement ? "Back to Delivered" : "Back to Reserved"}
         </Link>
       </PageHeader>
 
@@ -98,6 +117,7 @@ export default async function BulkPaymentPage({
       )}
       <PaymentUploadForm reservationIds={idsResult.data}>
         <input name="reservationIds" type="hidden" value={JSON.stringify(idsResult.data)} />
+        {isSettlement && <input name="paymentMode" type="hidden" value="settle" />}
         {ordered.map((reservation) => {
           const customer = customerById.get(reservation.customer_id);
           const transaction = transactionByReservation.get(reservation.id);
@@ -116,11 +136,12 @@ export default async function BulkPaymentPage({
                 pricing_complete: reservation.pricing_complete,
                 transaction,
               }}
+              settlementBalance={isSettlement ? Number(reservation.balance) : undefined}
             />
           );
         })}
         <PaymentFormActions
-          cancelHref="/reservations?status=reserved"
+          cancelHref={isSettlement ? "/reservations?status=delivered" : "/reservations?status=reserved"}
           pricingIncomplete={false}
           reservationCount={ordered.length}
         />

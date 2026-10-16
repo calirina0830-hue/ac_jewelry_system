@@ -45,6 +45,7 @@ type ReservationListRow = Pick<
   | "reserved_at"
   | "archived_at"
   | "live_batch"
+  | "delivered_at"
 >;
 
 export async function GET(request: NextRequest) {
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("reservation_list")
       .select(
-        "id, reservation_no, customer_name, customer_facebook_name, status, total, downpayment, balance, reserved_at, archived_at, live_batch",
+        "id, reservation_no, customer_name, customer_facebook_name, status, total, downpayment, balance, reserved_at, archived_at, live_batch, delivered_at",
       )
       .order(filters.sort, { ascending: filters.direction === "asc" })
       .range(from, from + EXPORT_PAGE_SIZE - 1);
@@ -81,6 +82,20 @@ export async function GET(request: NextRequest) {
 
     sourceRows.push(...(data ?? []));
     if (!data || data.length < EXPORT_PAGE_SIZE) break;
+  }
+
+  let partiallyPaidIds: string[] | undefined;
+  if (filters.status === "partially-paid") {
+    const { data: paymentRows, error: paymentError } = await supabase.rpc(
+      "get_partially_paid_reservation_ids",
+    );
+    if (paymentError) {
+      return NextResponse.json(
+        { error: "Reservation payments could not be exported." },
+        { status: 500 },
+      );
+    }
+    partiallyPaidIds = [...new Set(paymentRows ?? [])];
   }
 
   let itemMatchIds: string[] | undefined;
@@ -112,6 +127,7 @@ export async function GET(request: NextRequest) {
     status: filters.status,
     archive: filters.archive,
     itemMatchIds,
+    partiallyPaidIds,
   });
   const datesById = new Map<
     string,
@@ -156,7 +172,7 @@ export async function GET(request: NextRequest) {
   const operationalDateColumn =
     filters.status === "paid"
       ? "paid_at"
-      : filters.status === "delivered"
+      : filters.status === "delivered" || filters.status === "settled"
         ? "delivered_at"
         : filters.status === "cancelled"
           ? "cancelled_at"
@@ -196,7 +212,11 @@ export async function GET(request: NextRequest) {
         row.reservation_no,
         row.customer_name,
         row.customer_facebook_name,
-        getInvoiceStatusLabel(row.status),
+        filters.status === "partially-paid"
+          ? "Partially Paid"
+          : filters.status === "settled"
+            ? "Settled"
+          : getInvoiceStatusLabel(row.status),
         (itemsById.get(row.id) ?? []).join("; "),
         Number(row.total).toFixed(2),
         Number(row.downpayment).toFixed(2),

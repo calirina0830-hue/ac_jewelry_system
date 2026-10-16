@@ -65,6 +65,18 @@ export const cancelShipmentSchema = z.object({
   reason: z.string().trim().max(1000).optional(),
 });
 
+export const editShipmentSchema = z.object({
+  reservationId: z.string().uuid(),
+  shipmentId: shipmentIdSchema,
+  expectedUpdatedAt: z.iso.datetime({ offset: true }),
+  shippedAt: z.iso.datetime({ offset: true }),
+  notes: z.string().trim().max(2000).optional(),
+  correctionReason: z.string()
+    .trim()
+    .min(3, "Enter a correction reason.")
+    .max(1000, "Correction remarks cannot exceed 1000 characters."),
+});
+
 export const orderedAtSchema = z.object({
   reservationId: z.string().uuid(),
   reservationItemId: z.string().uuid(),
