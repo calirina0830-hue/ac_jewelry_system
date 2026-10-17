@@ -235,3 +235,27 @@ test("reservationQuerySchema validates page size options and defaults to 10", as
   assert.equal(reservationQuerySchema.parse({ pageSize: "100" }).pageSize, "10");
   assert.equal(reservationQuerySchema.parse({ pageSize: "invalid" }).pageSize, "10");
 });
+
+test("Reserved tab includes partially paid reservations without a separate tab", async () => {
+  const page = await readFile(
+    new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const tabs = page.slice(
+    page.indexOf("const STATUS_TABS"),
+    page.indexOf("function getEmptyStateConfig"),
+  );
+  const reservedBranch = page.slice(
+    page.indexOf('} else if (filters.status === "reserved")'),
+    page.indexOf('} else if (filters.status === "partially-paid")'),
+  );
+
+  assert.doesNotMatch(tabs, /partially-paid/);
+  assert.match(
+    reservedBranch,
+    /query = query\.eq\("status", "reserved"\)\.is\("delivered_at", null\)/,
+  );
+  assert.doesNotMatch(reservedBranch, /query\.not\(/);
+  assert.match(page, /const partiallyPaid =/);
+  assert.match(page, /\) : partiallyPaid \? \(/);
+});

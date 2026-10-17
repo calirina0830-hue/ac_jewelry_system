@@ -59,7 +59,6 @@ const BULK_RESERVATION_FORM_ID = "bulk-reservation-form";
 
 const STATUS_TABS = [
   { value: "reserved", label: "Reserved" },
-  { value: "partially-paid", label: "Partially Paid" },
   { value: "paid", label: "Paid" },
   { value: "delivered", label: "Delivered" },
   { value: "settled", label: "Settled Orders" },
@@ -213,7 +212,6 @@ export default async function ReservationsPage({
   // main reservation query does not wait for them one after another.
   const classificationPromise =
     isDeliveredView ||
-    filters.status === "reserved" ||
     filters.status === "partially-paid"
       ? supabase.rpc(
           isDeliveredView
@@ -248,7 +246,7 @@ export default async function ReservationsPage({
 
   if (isDeliveredView) {
     // Delivered means every item has been released. A first release sets
-    // delivered_at, but partially released orders remain in Partially Paid.
+    // delivered_at, but partially released orders remain in Reserved.
     query = query.in(
       "id",
       classificationIdList.length > 0
@@ -260,15 +258,6 @@ export default async function ReservationsPage({
     }
   } else if (filters.status === "reserved") {
     query = query.eq("status", "reserved").is("delivered_at", null);
-    if (classificationIdList.length > 0) {
-      query = query.not(
-        "id",
-        "in",
-        "(" +
-          classificationIdList.map((id) => '"' + id + '"').join(",") +
-          ")",
-      );
-    }
   } else if (filters.status === "partially-paid") {
     // Partial payment is a derived state: the reservation must still be
     // Reserved, have an active payment, and retain a balance.
@@ -860,6 +849,10 @@ export default async function ReservationsPage({
                     );
                     const allArchived = group.items.every((r) => Boolean(r.archived_at));
                     const allDelivered = group.items.every((r) => Boolean(r.delivered_at));
+                    const partiallyPaid =
+                      filters.status === "reserved" &&
+                      group.totalPaid > 0 &&
+                      group.totalBalance > 0;
 
                     // Earliest/primary operational date
                     const operationalDate =
@@ -948,6 +941,10 @@ export default async function ReservationsPage({
                               Settled
                             </span>
                           ) : filters.status === "partially-paid" ? (
+                            <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
+                              Partially Paid
+                            </span>
+                          ) : partiallyPaid ? (
                             <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-bold text-sky-700">
                               Partially Paid
                             </span>
