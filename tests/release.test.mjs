@@ -235,6 +235,27 @@ test("manual additions reuse one active reservation number per customer", async 
   );
 });
 
+test("active customer reservations ignore item dates and retain the earliest row date", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202611080001_merge_active_customer_reservations_regardless_of_date.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /status\s+in\s*\('reserved',\s*'paid'\)/i);
+  assert.match(
+    migration,
+    /order\s+by\s+reservation\.reserved_at,\s*reservation\.created_at,\s*reservation\.id/i,
+  );
+  assert.match(migration, /reservation_item_committed_quantity/i);
+  assert.match(migration, /ordered_at/i);
+  assert.match(migration, /update\s+public\.reservation_items\s+set\s+reservation_id\s*=\s*v_existing_id/i);
+  assert.match(migration, /reserved_at\s*=\s*least\(target\.reserved_at,\s*v_duplicate\.reserved_at\)/i);
+  assert.match(migration, /archived_at\s+is\s+null/i);
+});
+
 test("invoice PDF data reflects releases and remaining balance", async () => {
   const [document, data] = await Promise.all([
     readFile(
