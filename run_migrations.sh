@@ -29,7 +29,17 @@ for sql_file in \
   supabase/migrations/202610300001_separate_downpayment_from_payments.sql \
   supabase/migrations/202610310001_reliable_payment_edit.sql \
   supabase/migrations/202611010001_fix_payment_role_enum.sql \
-  supabase/migrations/202611020001_sync_paid_status_from_remaining_items.sql
+  supabase/migrations/202611020001_sync_paid_status_from_remaining_items.sql \
+  supabase/migrations/202611030001_partially_paid_reservation_ids.sql \
+  supabase/migrations/202611040002_restore_release_downpayment_source.sql \
+  supabase/migrations/202611050001_exclude_delivered_from_reservation_merge.sql \
+  supabase/migrations/202611050002_edit_payment_negative_adjustment.sql \
+  supabase/migrations/202611050003_void_payment_with_remarks.sql \
+  supabase/migrations/202611050004_release_corrections.sql \
+  supabase/migrations/202611050005_merge_customer_reservations_until_fully_delivered.sql \
+  supabase/migrations/202611050006_classify_partial_delivery_by_remaining_items.sql \
+  supabase/migrations/202611070001_optimize_reservation_classification.sql \
+  supabase/migrations/202611080001_merge_active_customer_reservations_regardless_of_date.sql
 do
   echo "Applying $sql_file..."
   docker run --rm \

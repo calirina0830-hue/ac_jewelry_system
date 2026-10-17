@@ -160,6 +160,12 @@ export function InvoiceReleaseModal({
       );
       return;
     }
+    if (numericDownpayment > availableDownpayment) {
+      setErrorMsg(
+        `Only ${formatCurrency(availableDownpayment)} of downpayment is available for release.`,
+      );
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMsg(null);
@@ -451,6 +457,10 @@ export function InvoiceReleaseModal({
                     <div className="flex justify-between text-ink">
                       <span>Total Value of Released Goods:</span>
                       <span className="font-semibold">{formatCurrency(totalSelectedValue)}</span>
+                    </div>
+                    <div className="flex justify-between text-ink">
+                      <span>Available Downpayment:</span>
+                      <span className="font-semibold">{formatCurrency(availableDownpayment)}</span>
                     </div>
                     <div className="flex justify-between text-ink">
                       <span>Downpayment:</span>

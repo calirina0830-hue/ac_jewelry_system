@@ -17,6 +17,15 @@ import {
 const WRITE_ROLES = ["admin", "staff"] as const;
 const VIEW_ROLES = ["admin", "staff", "viewer"] as const;
 
+function formatReleaseCurrency(value: number) {
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.max(value, 0));
+}
+
 export type ShipmentMutationResult = {
   status: "success" | "error";
   message: string;
@@ -284,10 +293,19 @@ export async function createItemRelease(
   }
 
   if (remainingDownpaymentToApply > 0) {
+    const maxApplicableTotal = orderedResIds.reduce(
+      (total, resId) =>
+        total +
+        Math.min(
+          availableDownpaymentMap.get(resId) ?? 0,
+          groupReleasedValueMap.get(resId) ?? 0,
+        ),
+      0,
+    );
     return {
       status: "error",
       message:
-        "The entered downpayment exceeds the available downpayment or the value of the selected items.",
+        `Only ${formatReleaseCurrency(maxApplicableTotal)} can be applied to this release. Check the available downpayment and selected item value.`,
     };
   }
 

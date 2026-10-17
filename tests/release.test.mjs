@@ -249,6 +249,7 @@ test("active customer reservations ignore item dates and retain the earliest row
     migration,
     /order\s+by\s+reservation\.reserved_at,\s*reservation\.created_at,\s*reservation\.id/i,
   );
+  assert.match(migration, /reservation\.status\s*=\s*'delivered'/i);
   assert.match(migration, /reservation_item_committed_quantity/i);
   assert.match(migration, /ordered_at/i);
   assert.match(migration, /update\s+public\.reservation_items\s+set\s+reservation_id\s*=\s*v_existing_id/i);

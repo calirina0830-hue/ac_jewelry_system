@@ -38,7 +38,18 @@ begin
   into v_existing_id
   from public.reservations as reservation
   where reservation.customer_id = p_customer_id
-    and reservation.status in ('reserved', 'paid')
+    and (
+      reservation.status in ('reserved', 'paid')
+      or (
+        reservation.status = 'delivered'
+        and exists (
+          select 1
+          from public.reservation_items as existing_item
+          where existing_item.reservation_id = reservation.id
+            and existing_item.quantity > public.reservation_item_committed_quantity(existing_item.id)
+        )
+      )
+    )
     and reservation.archived_at is null
     and exists (
       select 1
@@ -189,7 +200,18 @@ begin
     select reservation.customer_id
     from public.reservations as reservation
     where reservation.archived_at is null
-      and reservation.status in ('reserved', 'paid')
+      and (
+        reservation.status in ('reserved', 'paid')
+        or (
+          reservation.status = 'delivered'
+          and exists (
+            select 1
+            from public.reservation_items as item
+            where item.reservation_id = reservation.id
+              and item.quantity > public.reservation_item_committed_quantity(item.id)
+          )
+        )
+      )
       and exists (
         select 1
         from public.reservation_items as item
@@ -204,7 +226,18 @@ begin
     from public.reservations as reservation
     where reservation.customer_id = v_group.customer_id
       and reservation.archived_at is null
-      and reservation.status in ('reserved', 'paid')
+      and (
+        reservation.status in ('reserved', 'paid')
+        or (
+          reservation.status = 'delivered'
+          and exists (
+            select 1
+            from public.reservation_items as item
+            where item.reservation_id = reservation.id
+              and item.quantity > public.reservation_item_committed_quantity(item.id)
+          )
+        )
+      )
       and exists (
         select 1
         from public.reservation_items as item
@@ -220,7 +253,18 @@ begin
       from public.reservations as reservation
       where reservation.customer_id = v_group.customer_id
         and reservation.archived_at is null
-        and reservation.status in ('reserved', 'paid')
+        and (
+          reservation.status in ('reserved', 'paid')
+          or (
+            reservation.status = 'delivered'
+            and exists (
+              select 1
+              from public.reservation_items as item
+              where item.reservation_id = reservation.id
+                and item.quantity > public.reservation_item_committed_quantity(item.id)
+            )
+          )
+        )
         and reservation.id <> v_target_id
         and exists (
           select 1
