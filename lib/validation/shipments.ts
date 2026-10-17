@@ -55,6 +55,14 @@ export const prepareReleaseSchema = prepareShipmentSchema.extend({
 });
 
 export const releaseItemsSchema = prepareReleaseSchema.extend({
+  downpaymentApplied: z.preprocess(
+    (value) =>
+      value === null || value === undefined || value === "" ? "0" : value,
+    downpaymentAppliedSchema.refine(
+      (value) => Number(value) > 0,
+      "A downpayment greater than ₱0.00 is required to release items.",
+    ),
+  ),
   releaseDate: z.string().trim().min(1, "Enter a valid release date."),
   notes: z.string().trim().max(2000, "Notes cannot exceed 2000 characters.").optional(),
 });

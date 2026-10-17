@@ -38,14 +38,12 @@ export function InvoiceReleaseModal({
   reservationId,
   reservationNo,
   items,
-  availableDownpayment,
   canRelease,
   history,
 }: {
   reservationId: string;
   reservationNo: string;
   items: InvoiceReleaseItem[];
-  availableDownpayment: number;
   canRelease: boolean;
   history: InvoiceReleaseHistoryItem[];
 }) {
@@ -140,11 +138,6 @@ export function InvoiceReleaseModal({
     return isNaN(val) ? 0 : val;
   }, [downpaymentDeduction]);
 
-  const remainingDownpaymentAfterRelease = Math.max(
-    availableDownpayment - numericDownpayment,
-    0,
-  );
-
   const handleConfirmRelease = async () => {
     if (selectedItemsList.length === 0) {
       setErrorMsg("Please select at least one item to release.");
@@ -160,10 +153,8 @@ export function InvoiceReleaseModal({
       );
       return;
     }
-    if (numericDownpayment > availableDownpayment) {
-      setErrorMsg(
-        `Only ${formatCurrency(availableDownpayment)} of downpayment is available for release.`,
-      );
+    if (numericDownpayment <= 0) {
+      setErrorMsg("A downpayment greater than ₱0.00 is required to release items.");
       return;
     }
 
@@ -459,18 +450,14 @@ export function InvoiceReleaseModal({
                       <span className="font-semibold">{formatCurrency(totalSelectedValue)}</span>
                     </div>
                     <div className="flex justify-between text-ink">
-                      <span>Available Downpayment:</span>
-                      <span className="font-semibold">{formatCurrency(availableDownpayment)}</span>
+                      <span>Cash on Delivery Balance:</span>
+                      <span className="font-semibold">{formatCurrency(Math.max(totalSelectedValue - numericDownpayment, 0))}</span>
                     </div>
                     <div className="flex justify-between text-ink">
                       <span>Downpayment:</span>
                       <span className="font-semibold text-emerald-700">
                         -{formatCurrency(numericDownpayment)}
                       </span>
-                    </div>
-                    <div className="flex justify-between text-ink">
-                      <span>Remaining Downpayment Balance:</span>
-                      <span className="font-semibold">{formatCurrency(remainingDownpaymentAfterRelease)}</span>
                     </div>
                     <div className="border-t border-gold/30 pt-1.5 flex justify-between font-bold text-ink">
                       <span>Balance on Released Items:</span>

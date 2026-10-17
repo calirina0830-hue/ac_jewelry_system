@@ -8,7 +8,10 @@ import {
   releaseStatusLabel,
 } from "../lib/reservations/release.ts";
 import { buildShipmentDocDefinition } from "../lib/reservations/invoice-document.ts";
-import { prepareReleaseSchema } from "../lib/validation/shipments.ts";
+import {
+  prepareReleaseSchema,
+  releaseItemsSchema,
+} from "../lib/validation/shipments.ts";
 
 const reservationId = "11111111-1111-4111-8111-111111111111";
 const itemA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -47,6 +50,23 @@ test("release selection rejects malformed downpayment amounts", () => {
       invalid,
     );
   }
+});
+
+test("item release requires a positive downpayment", () => {
+  const base = {
+    reservationId,
+    items: [{ reservationItemId: itemA, quantity: 1 }],
+    releaseDate: "2026-10-18",
+  };
+
+  assert.equal(
+    releaseItemsSchema.safeParse({ ...base, downpaymentApplied: "0" }).success,
+    false,
+  );
+  assert.equal(
+    releaseItemsSchema.safeParse({ ...base, downpaymentApplied: "500" }).success,
+    true,
+  );
 });
 
 test("release status derives Partially or Fully Released from released quantity", () => {
@@ -311,6 +331,20 @@ test("release migration adds downpayment columns and the committed helper", asyn
   ]) {
     assert.equal(sql.includes(fragment), true, fragment);
   }
+});
+
+test("release downpayment can become COD but cannot be zero", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202611090001_release_downpayment_as_cod.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /p_allow_unfunded_downpayment/i);
+  assert.match(migration, /downpayment_required/i);
+  assert.match(migration, /p_downpayment_applied\s*<=\s*0/i);
 });
 
 test("reservation detail page displays release quantities and downpayment", async () => {

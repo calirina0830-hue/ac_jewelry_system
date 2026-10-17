@@ -39,7 +39,8 @@ for sql_file in \
   supabase/migrations/202611050005_merge_customer_reservations_until_fully_delivered.sql \
   supabase/migrations/202611050006_classify_partial_delivery_by_remaining_items.sql \
   supabase/migrations/202611070001_optimize_reservation_classification.sql \
-  supabase/migrations/202611080001_merge_active_customer_reservations_regardless_of_date.sql
+  supabase/migrations/202611080001_merge_active_customer_reservations_regardless_of_date.sql \
+  supabase/migrations/202611090001_release_downpayment_as_cod.sql
 do
   echo "Applying $sql_file..."
   docker run --rm \

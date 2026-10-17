@@ -83,6 +83,9 @@ function shipmentErrorMessage(message: string): string {
   if (message.includes("insufficient_downpayment")) {
     return "That downpayment is no longer available to apply.";
   }
+  if (message.includes("downpayment_required")) {
+    return "A downpayment greater than ₱0.00 is required to release items.";
+  }
   if (message.includes("downpayment_exceeds_released_value")) {
     return "The downpayment to apply cannot exceed the value of the released items.";
   }
@@ -196,6 +199,12 @@ export async function createItemRelease(
 
   const supabase = await createClient();
   const requestedDownpayment = Number(parsed.data.downpaymentApplied);
+  if (requestedDownpayment <= 0) {
+    return {
+      status: "error",
+      message: "A downpayment greater than ₱0.00 is required to release items.",
+    };
+  }
   const formattedDate = parsed.data.releaseDate.includes("T")
     ? parsed.data.releaseDate
     : parsed.data.releaseDate + "T12:00:00Z";
@@ -252,28 +261,11 @@ export async function createItemRelease(
     groupReleasedValueMap.set(actualResId, prevValue + itemValue);
   }
 
-  // Get available downpayment for each reservation in the groups
+  // Release downpayment is the amount paid for this handover. It is allowed
+  // to be less than the selected goods value so the remainder can be COD.
   const distinctResIds = Array.from(groupsByResId.keys());
-  const { data: resRows } = await supabase
-    .from("reservations")
-    .select("id, downpayment")
-    .in("id", distinctResIds);
-
-  const resDownpaymentMap = new Map((resRows ?? []).map((r) => [r.id, Number(r.downpayment)]));
-
-  // Determine available downpayment per reservation
-  const availableDownpaymentMap = new Map<string, number>();
-  for (const resId of distinctResIds) {
-    const { data: committed } = await supabase.rpc("reservation_downpayment_committed", {
-      p_reservation_id: resId,
-    });
-    const totalDownpayment = resDownpaymentMap.get(resId) ?? 0;
-    const committedAmount = Number(committed ?? 0);
-    availableDownpaymentMap.set(resId, Math.max(totalDownpayment - committedAmount, 0));
-  }
-
-  // Distribute requestedDownpayment across the reservations up to their available downpayment
-  // AND capped at each group's released value (since DB forbids downpayment > released value)
+  // Distribute the entered amount across reservation groups, capped only by
+  // each group's released value.
   let remainingDownpaymentToApply = requestedDownpayment;
   const downpaymentByResId = new Map<string, number>();
 
@@ -284,9 +276,8 @@ export async function createItemRelease(
   ];
 
   for (const resId of orderedResIds) {
-    const avail = availableDownpaymentMap.get(resId) ?? 0;
     const maxForGroup = groupReleasedValueMap.get(resId) ?? 0;
-    const maxApplicable = Math.min(avail, maxForGroup);
+    const maxApplicable = maxForGroup;
     const toApply = Math.min(remainingDownpaymentToApply, maxApplicable);
     downpaymentByResId.set(resId, Math.round(toApply * 100) / 100);
     remainingDownpaymentToApply = Math.max(0, remainingDownpaymentToApply - toApply);
@@ -296,10 +287,7 @@ export async function createItemRelease(
     const maxApplicableTotal = orderedResIds.reduce(
       (total, resId) =>
         total +
-        Math.min(
-          availableDownpaymentMap.get(resId) ?? 0,
-          groupReleasedValueMap.get(resId) ?? 0,
-        ),
+        (groupReleasedValueMap.get(resId) ?? 0),
       0,
     );
     return {
@@ -334,7 +322,7 @@ export async function createItemRelease(
     } | null = data;
 
     if (error || !releaseResult) {
-      // If the 3-arg prepare_reservation_shipment or release_reservation_items does not exist in the remote database,
+      // If the release-aware prepare_reservation_shipment or release_reservation_items does not exist in the remote database,
       // fall back gracefully to the established prepare_reservation_shipment(uuid, jsonb) and confirm_reservation_shipment
       if (error?.message?.includes("prepare_reservation_shipment") || error?.message?.includes("release_reservation_items")) {
         console.warn("release_reservation_items failed with missing function; executing standard release workflow...");
@@ -348,6 +336,7 @@ export async function createItemRelease(
           p_reservation_id: resId,
           p_items: releaseItemsPayload,
           p_downpayment_applied: downpaymentForGroup,
+          p_allow_unfunded_downpayment: true,
         });
 
         let usedLegacyPrepare = false;
