@@ -5,6 +5,19 @@ export function sanitizeSearchTerm(value: string): string {
     .trim();
 }
 
+export function toSearchPattern(value: string): string {
+  const terms = value.trim().split(/\s+/).filter(Boolean);
+  return "%" + terms.join("%") + "%";
+}
+
+export function normalizeSearchText(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 export function toSearchParams(
   values: Record<string, string | number | undefined>,
 ): URLSearchParams {

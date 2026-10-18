@@ -278,13 +278,20 @@ test("active customer reservations ignore item dates and retain the earliest row
 });
 
 test("invoice PDF data reflects releases and remaining balance", async () => {
-  const [document, data] = await Promise.all([
+  const [document, data, page] = await Promise.all([
     readFile(
       new URL("../lib/reservations/invoice-document.ts", import.meta.url),
       "utf8",
     ),
     readFile(
       new URL("../lib/reservations/invoice-data.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../app/(dashboard)/reservations/[id]/invoice/page.tsx",
+        import.meta.url,
+      ),
       "utf8",
     ),
   ]);
@@ -302,10 +309,26 @@ test("invoice PDF data reflects releases and remaining balance", async () => {
     "remainingSubtotal",
     "downpaymentCommitted",
     "reservation_shipments",
-    "remainingUnapplied",
+    "remainingDownpaymentBalance",
   ]) {
     assert.equal(data.includes(fragment), true, "data: " + fragment);
   }
+  assert.match(
+    data,
+    /balanceDue = Math\.max\(\s*remainingTotal - remainingDownpaymentBalance,\s*0,\s*\)/,
+  );
+  assert.match(
+    page,
+    /balanceDue = Math\.max\(\s*remainingTotal - remainingDownpaymentBalance,\s*0,\s*\)/,
+  );
+  assert.match(
+    data,
+    /remainingDownpayment:\s*remainingDownpaymentBalance/,
+  );
+  assert.match(
+    page,
+    /label="Remaining Downpayment Balance"\s+value=\{remainingDownpaymentBalance\}/,
+  );
 });
 
 test("release migration adds downpayment columns and the committed helper", async () => {

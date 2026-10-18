@@ -10,6 +10,7 @@ import {
   PRIVATE_SEARCH_COOKIE_NAMES,
   readPrivateSearchTerm,
 } from "@/lib/private-search";
+import { toSearchPattern } from "@/lib/query";
 import { getInvoiceStatusLabel } from "@/lib/reservations/invoice";
 import { createClient } from "@/lib/supabase/server";
 import { reservationQuerySchema } from "@/lib/validation/reservations";
@@ -104,11 +105,10 @@ export async function GET(request: NextRequest) {
       .from("reservation_items")
       .select("reservation_id")
       .or(
-        "sku.ilike.%" +
-          search +
-          "%,item_name.ilike.%" +
-          search +
-          "%",
+        "sku.ilike." +
+          toSearchPattern(search) +
+          ",item_name.ilike." +
+          toSearchPattern(search),
       );
     if (itemsError) {
       return NextResponse.json(

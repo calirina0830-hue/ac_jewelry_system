@@ -5,6 +5,7 @@ import { logActivity } from "@/lib/activity";
 import { authorizeRoles } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
 import { buildShipmentDocDefinition } from "@/lib/reservations/invoice-document";
+import { calculateRemainingDownpaymentBalance } from "@/lib/reservations/payment-transaction";
 import { renderPdf } from "@/lib/reservations/pdf";
 import { createClient } from "@/lib/supabase/server";
 
@@ -67,7 +68,7 @@ export async function GET(
     { data: customer },
     { data: staffProfile },
     { data: allShipments },
-    { data: resData },
+    { data: payments, error: paymentsError },
   ] = await Promise.all([
     supabase
       .from("reservation_items")
@@ -93,19 +94,30 @@ export async function GET(
       .select("status, downpayment_applied")
       .eq("reservation_id", reservation.id),
     supabase
-      .from("reservations")
-      .select("downpayment")
-      .eq("id", reservation.id)
-      .maybeSingle(),
+      .from("reservation_payments")
+      .select("amount")
+      .eq("reservation_id", reservation.id)
+      .is("voided_at", null),
   ]);
 
-  const downpaymentAmount = Number(resData?.downpayment ?? 0);
-  const totalDownpaymentApplied = (allShipments ?? [])
-    .filter((s) => s.status === "shipped")
-    .reduce((sum, s) => sum + Number(s.downpayment_applied ?? 0), 0);
-  const remainingDownpayment = Math.max(
-    downpaymentAmount - totalDownpaymentApplied,
+  if (paymentsError) {
+    console.error("Failed to load delivery invoice payment records.", paymentsError);
+    return NextResponse.json(
+      { error: "Unable to load delivery invoice payment data." },
+      { status: 500 },
+    );
+  }
+
+  const totalPaid = (payments ?? []).reduce(
+    (total, payment) => total + Number(payment.amount),
     0,
+  );
+  const remainingDownpayment = calculateRemainingDownpaymentBalance(
+    totalPaid,
+    (allShipments ?? []).map((shipment) => ({
+      status: shipment.status,
+      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+    })),
   );
 
   const lineById = new Map((lineItems ?? []).map((line) => [line.id, line]));

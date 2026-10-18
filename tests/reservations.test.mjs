@@ -12,10 +12,46 @@ import {
   createReservationSchema,
   updateReservationSchema,
 } from "../lib/validation/reservations.ts";
+import {
+  normalizeSearchText,
+  toSearchPattern,
+} from "../lib/query.ts";
+import { filterReservationExportRows } from "../lib/export/filters.ts";
 
 const customerId = "11111111-1111-4111-8111-111111111111";
 const stockItemId = "22222222-2222-4222-8222-222222222222";
 const secondStockItemId = "33333333-3333-4333-8333-333333333333";
+
+test("reservation search tolerates punctuation removed from search text", () => {
+  const search = "Baby Yra s OL-shoppe";
+  const customerName = "Baby Yra's OL-shoppe";
+
+  assert.equal(
+    normalizeSearchText(customerName).includes(normalizeSearchText(search)),
+    true,
+  );
+  assert.equal(toSearchPattern(search), "%Baby%Yra%s%OL-shoppe%");
+  assert.deepEqual(
+    filterReservationExportRows(
+      [
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          reservation_no: "RES-2026-000001",
+          customer_name: customerName,
+          customer_facebook_name: customerName,
+          status: "reserved",
+          archived_at: null,
+        },
+      ],
+      {
+        q: search,
+        status: "reserved",
+        archive: "active",
+      },
+    ).map((row) => row.customer_name),
+    [customerName],
+  );
+});
 
 test("reservation validation accepts multiple items", () => {
   const result = createReservationSchema.parse({

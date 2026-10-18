@@ -110,11 +110,14 @@ export async function loadInvoiceDocument(
   );
   const downpaymentCommitted = releaseLedger.downpaymentCommitted;
   const downpaymentAmount = Number(reservation.downpayment);
-  const remainingUnapplied = Math.max(
+  const remainingDownpaymentBalance = Math.max(
     totals.amountPaid - downpaymentCommitted,
     0,
   );
-  const balanceDue = Math.max(remainingTotal - remainingUnapplied, 0);
+  const balanceDue = Math.max(
+    remainingTotal - remainingDownpaymentBalance,
+    0,
+  );
 
   const releasedItems = new Set(
     releaseLedger.items
@@ -158,10 +161,7 @@ export async function loadInvoiceDocument(
         total: remainingTotal,
         amountPaid: totals.amountPaid,
         downpayment: downpaymentAmount,
-        remainingDownpayment: Math.max(
-          downpaymentAmount - downpaymentCommitted,
-          0,
-        ),
+        remainingDownpayment: remainingDownpaymentBalance,
         balance: balanceDue,
       },
       totalQuantity: releaseLedger.remainingUnits,

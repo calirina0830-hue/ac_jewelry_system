@@ -39,7 +39,7 @@ import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { toSearchParams } from "@/lib/query";
+import { toSearchParams, toSearchPattern } from "@/lib/query";
 import {
   PRIVATE_SEARCH_COOKIE_NAMES,
   readPrivateSearchTerm,
@@ -224,11 +224,10 @@ export default async function ReservationsPage({
         .from("reservation_items")
         .select("reservation_id")
         .or(
-          "sku.ilike.%" +
-            search +
-            "%,item_name.ilike.%" +
-            search +
-            "%",
+          "sku.ilike." +
+            toSearchPattern(search) +
+            ",item_name.ilike." +
+            toSearchPattern(search),
         )
     : Promise.resolve({ data: [] as Array<{ reservation_id: string }> });
   const [classificationResult, itemMatchResult] = await Promise.all([
@@ -314,7 +313,7 @@ export default async function ReservationsPage({
   }
 
   if (search) {
-    const pattern = "%" + search + "%";
+    const pattern = toSearchPattern(search);
     let condition =
       "reservation_no.ilike." +
       pattern +

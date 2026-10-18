@@ -16,7 +16,10 @@ import {
   buildBulkPaymentHref,
   parseBulkPaymentIds,
 } from "../lib/reservations/payment-selection.ts";
-import { calculatePaymentTransactionSummary } from "../lib/reservations/payment-transaction.ts";
+import {
+  calculatePaymentTransactionSummary,
+  calculateRemainingDownpaymentBalance,
+} from "../lib/reservations/payment-transaction.ts";
 import {
   buildPaymentEvidencePath,
   getPaymentEvidenceUrl,
@@ -163,6 +166,23 @@ test("record payment totals use unreleased items and active payment records", ()
       },
     ],
     payments: [500, 300],
+  });
+
+  test("remaining downpayment uses recorded payments minus active shipment applications", () => {
+    assert.equal(
+      calculateRemainingDownpaymentBalance(1000, [
+        { status: "shipped", downpaymentApplied: 200 },
+        { status: "pending", downpaymentApplied: 100 },
+        { status: "cancelled", downpaymentApplied: 500 },
+      ]),
+      700,
+    );
+    assert.equal(
+      calculateRemainingDownpaymentBalance(100, [
+        { status: "shipped", downpaymentApplied: 150 },
+      ]),
+      0,
+    );
   });
 
   assert.equal(summary.originalTotal, 2200);

@@ -48,6 +48,24 @@ function fromCents(value: number): number {
   return value / 100;
 }
 
+export function calculateRemainingDownpaymentBalance(
+  totalPaid: number,
+  shipments: Array<Pick<TransactionShipment, "status" | "downpaymentApplied">>,
+): number {
+  const totalPaidCents = toCents(totalPaid);
+  const appliedToReleasesCents = shipments
+    .filter(
+      (shipment) =>
+        shipment.status === "pending" || shipment.status === "shipped",
+    )
+    .reduce(
+      (total, shipment) => total + toCents(shipment.downpaymentApplied),
+      0,
+    );
+
+  return fromCents(Math.max(totalPaidCents - appliedToReleasesCents, 0));
+}
+
 export function calculatePaymentTransactionSummary({
   originalTotal,
   reservationDiscount,

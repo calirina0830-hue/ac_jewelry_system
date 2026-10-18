@@ -1,4 +1,5 @@
 import type { ReservationStatus } from "@/types/database";
+import { normalizeSearchText } from "@/lib/query";
 
 export type ReservationExportFilter = {
   q: string;
@@ -25,7 +26,7 @@ export function filterReservationExportRows<T extends ReservationExportSource>(
   rows: readonly T[],
   filters: ReservationExportFilter,
 ): T[] {
-  const search = filters.q.trim().toLocaleLowerCase();
+  const search = normalizeSearchText(filters.q);
   const itemMatchIds = filters.itemMatchIds
     ? new Set(filters.itemMatchIds)
     : undefined;
@@ -51,9 +52,9 @@ export function filterReservationExportRows<T extends ReservationExportSource>(
     const matchesSearch =
       !search ||
       itemMatchIds?.has(row.id) ||
-      row.reservation_no.toLocaleLowerCase().includes(search) ||
-      row.customer_name.toLocaleLowerCase().includes(search) ||
-      row.customer_facebook_name?.toLocaleLowerCase().includes(search);
+      normalizeSearchText(row.reservation_no).includes(search) ||
+      normalizeSearchText(row.customer_name).includes(search) ||
+      normalizeSearchText(row.customer_facebook_name).includes(search);
     const matchesLiveBatch =
       !filters.liveBatch || row.live_batch === filters.liveBatch;
 

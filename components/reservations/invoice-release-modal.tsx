@@ -102,19 +102,21 @@ export function InvoiceReleaseModal({
     }));
   };
 
-  const allItemsSelected = items.length > 0 && items.every((item) => selectedItemIds[item.id]);
+  const allItemsSelected =
+    items.length > 0 && items.every((item) => selectedItemIds[item.id]);
   const someItemsSelected = items.some((item) => selectedItemIds[item.id]);
 
   useEffect(() => {
     if (selectAllInputRef.current) {
-      selectAllInputRef.current.indeterminate = someItemsSelected && !allItemsSelected;
+      selectAllInputRef.current.indeterminate =
+        someItemsSelected && !allItemsSelected;
     }
   }, [allItemsSelected, someItemsSelected]);
 
   const handleToggleAllItems = () => {
-    setSelectedItemIds((prev) => {
-      const next = { ...prev };
+    setSelectedItemIds((previous) => {
       const nextValue = !allItemsSelected;
+      const next = { ...previous };
 
       items.forEach((item) => {
         next[item.id] = nextValue;

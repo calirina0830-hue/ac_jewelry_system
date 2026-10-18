@@ -133,11 +133,14 @@ export default async function ReservationInvoicePage({
   );
   const downpaymentCommitted = releaseLedger.downpaymentCommitted;
   const downpaymentAmount = Number(reservation.downpayment);
-  const remainingUnapplied = Math.max(
+  const remainingDownpaymentBalance = Math.max(
     totals.amountPaid - downpaymentCommitted,
     0,
   );
-  const balanceDue = Math.max(remainingTotal - remainingUnapplied, 0);
+  const balanceDue = Math.max(
+    remainingTotal - remainingDownpaymentBalance,
+    0,
+  );
   const releaseById = new Map(
     releaseLedger.items.map((item) => [item.id, item]),
   );
@@ -248,13 +251,7 @@ export default async function ReservationInvoicePage({
         <div className="flex flex-wrap items-center justify-end gap-2">
           {/* Download PDF action endpoint: /invoice/pdf */}
           <InvoiceActionBar
-            balance={totals.balance}
-            canWrite={canWrite && !reservation.archived_at && reservation.status !== "cancelled"}
-            deliveredAt={reservation.delivered_at}
-            notes={reservation.notes}
-            pricingComplete={reservation.pricing_complete}
             reservationId={reservation.id}
-            updatedAt={reservation.updated_at}
           />
         </div>
       </div>
@@ -499,7 +496,7 @@ export default async function ReservationInvoicePage({
             )}
             <InvoiceTotal
               label="Remaining Downpayment Balance"
-              value={Math.max(downpaymentAmount - downpaymentCommitted, 0)}
+              value={remainingDownpaymentBalance}
             />
             <div
               className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-gold/60 bg-gold-soft px-5 py-4"

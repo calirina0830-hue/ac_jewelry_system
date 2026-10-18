@@ -202,6 +202,58 @@ test("invoice document renders every item without dropping order dates", () => {
   assert.equal(footer.columns[1].text, "Page 2 of 5");
 });
 
+test("invoice PDF includes the remaining downpayment balance", () => {
+  const document = buildInvoiceDocDefinition({
+    business: {
+      name: "AC Pearls and Jewels",
+      descriptor: "Fine jewelry",
+      systemLabel: "Reservation System",
+    },
+    invoiceNo: "RES-2026-000002",
+    invoiceDate: "2026-08-18T00:00:00+08:00",
+    statusLabel: "Reserved",
+    delivered: false,
+    customerName: "Rina Santos",
+    facebookName: "RinaS",
+    phone: null,
+    address: null,
+    notes: null,
+    items: [
+      {
+        description: "BRKB - BAROQUE - Bracelet",
+        orderedAt: null,
+        quantity: 1,
+        unitPrice: 1000,
+        lineTotal: 1000,
+      },
+    ],
+    totals: {
+      subtotal: 1000,
+      reservationDiscount: 0,
+      total: 1000,
+      amountPaid: 1000,
+      downpayment: 0,
+      remainingDownpayment: 800,
+      balance: 200,
+    },
+    totalQuantity: 1,
+    released: {
+      units: 1,
+      subtotal: 200,
+      downpaymentApplied: 200,
+    },
+    generatedAt: "2026-10-11T00:00:00+08:00",
+  });
+
+  const renderedDocument = JSON.stringify(document);
+  assert.equal(
+    renderedDocument.includes("Remaining Downpayment Balance"),
+    true,
+  );
+  assert.equal(renderedDocument.includes("₱800.00"), true);
+  assert.equal(renderedDocument.includes("₱200.00"), true);
+});
+
 test("shipment document records the shipment number and quantities", () => {
   const document = buildShipmentDocDefinition({
     business: {
@@ -230,4 +282,51 @@ test("shipment document records the shipment number and quantities", () => {
   const table = document.content.find((node) => "table" in node);
   assert.equal(table.table.body.length, 2);
   assert.equal(table.table.body[1][3].text, "2");
+});
+
+test("delivery invoice renders the remaining downpayment balance", async () => {
+  const document = buildShipmentDocDefinition({
+    business: {
+      name: "AC Pearls and Jewels",
+      descriptor: "Fine jewelry",
+      systemLabel: "Reservation System",
+    },
+    shipmentNo: "SHP-2026-000002",
+    shipmentStatus: "Delivered",
+    shipmentDate: "2026-10-11T00:00:00+08:00",
+    shippedAt: "2026-10-11T00:00:00+08:00",
+    reservationNo: "RES-2026-000001",
+    customerName: "Rina Santos",
+    facebookName: null,
+    phone: null,
+    address: null,
+    notes: null,
+    cancelReason: null,
+    downpaymentApplied: 200,
+    remainingDownpayment: 800,
+    items: [
+      {
+        description: "SKU-1 - Ring - Gold",
+        orderedAt: null,
+        quantity: 1,
+        subtotal: 1000,
+      },
+    ],
+    totalQuantity: 1,
+    generatedAt: "2026-10-11T00:00:00+08:00",
+  });
+
+  const renderedDocument = JSON.stringify(document);
+  assert.equal(renderedDocument.includes("Remaining Downpayment Balance"), true);
+  assert.equal(renderedDocument.includes("₱800.00"), true);
+
+  const route = await readFile(
+    new URL(
+      "../app/(dashboard)/shipments/[shipmentId]/pdf/route.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(route, /\.from\("reservation_payments"\)/);
+  assert.match(route, /calculateRemainingDownpaymentBalance\(/);
 });
