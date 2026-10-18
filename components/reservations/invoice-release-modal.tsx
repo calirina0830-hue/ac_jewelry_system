@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { createItemRelease } from "@/actions/shipments";
@@ -51,6 +51,7 @@ export function InvoiceReleaseModal({
   const dateInputId = useId();
   const downpaymentInputId = useId();
   const notesInputId = useId();
+  const selectAllInputRef = useRef<HTMLInputElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -99,6 +100,28 @@ export function InvoiceReleaseModal({
       ...prev,
       [itemId]: !prev[itemId],
     }));
+  };
+
+  const allItemsSelected = items.length > 0 && items.every((item) => selectedItemIds[item.id]);
+  const someItemsSelected = items.some((item) => selectedItemIds[item.id]);
+
+  useEffect(() => {
+    if (selectAllInputRef.current) {
+      selectAllInputRef.current.indeterminate = someItemsSelected && !allItemsSelected;
+    }
+  }, [allItemsSelected, someItemsSelected]);
+
+  const handleToggleAllItems = () => {
+    setSelectedItemIds((prev) => {
+      const next = { ...prev };
+      const nextValue = !allItemsSelected;
+
+      items.forEach((item) => {
+        next[item.id] = nextValue;
+      });
+
+      return next;
+    });
   };
 
   const handleQuantityChange = (itemId: string, max: number, valueStr: string) => {
@@ -347,7 +370,20 @@ export function InvoiceReleaseModal({
                       <table className="w-full text-left text-sm">
                         <thead className="bg-canvas border-b border-border text-[11px] uppercase tracking-wider text-muted">
                           <tr>
-                            <th className="p-3 text-center w-10">Select</th>
+                            <th className="p-3 text-center w-10">
+                              <label className="inline-flex cursor-pointer items-center gap-1.5">
+                                <input
+                                  ref={selectAllInputRef}
+                                  type="checkbox"
+                                  checked={allItemsSelected}
+                                  onChange={handleToggleAllItems}
+                                  disabled={items.length === 0}
+                                  aria-label="Select all release items"
+                                  className="h-4 w-4 rounded border-border text-gold focus:ring-gold"
+                                />
+                                <span>Select</span>
+                              </label>
+                            </th>
                             <th className="p-3">Item Details</th>
                             <th className="p-3">Order Date</th>
                             <th className="p-3 text-right">Available</th>
