@@ -1,3 +1,4 @@
+import { formatItemLabel } from "@/lib/reservations/item-label";
 import { BUSINESS } from "@/lib/constants/business";
 import {
   getInvoiceStatusLabel,
@@ -10,7 +11,6 @@ import type { createClient } from "@/lib/supabase/server";
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 export interface LoadedInvoice {
-  reservationNo: string;
   document: InvoiceDocumentInput;
 }
 
@@ -76,7 +76,7 @@ export async function loadInvoiceDocument(
   const releaseLedger = computeReleaseLedger(
     (items ?? []).map((item) => ({
       id: item.id,
-      description: item.sku + " - " + item.item_name + " - " + item.category,
+      description: formatItemLabel({ sku: item.sku, name: item.item_name, category: item.category }),
       quantity: Number(item.quantity),
       unitPrice: Number(item.unit_price),
       discount: Number(item.discount ?? 0),
@@ -142,10 +142,8 @@ export async function loadInvoiceDocument(
     });
 
   return {
-    reservationNo: reservation.reservation_no,
     document: {
       business: BUSINESS,
-      invoiceNo: reservation.reservation_no,
       invoiceDate: reservation.reserved_at,
       statusLabel: getInvoiceStatusLabel(reservation.status),
       delivered: Boolean(reservation.delivered_at),

@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { PaymentEvidenceInput } from "@/components/reservations/payment-evidence-input";
 import { formatCurrency } from "@/lib/format";
+import { combinePaymentSummaries } from "@/lib/reservations/payment-allocation";
 import type { PaymentTransactionSummary } from "@/lib/reservations/payment-transaction";
 
 export type RecordPaymentCustomer = {
@@ -14,22 +15,27 @@ export type RecordPaymentCustomer = {
 
 export type RecordPaymentReservation = {
   id: string;
-  reservation_no: string;
   updated_at: string;
   pricing_complete: boolean;
   transaction: PaymentTransactionSummary;
 };
 
+// One card per customer name: every reservation of that customer is shown and
+// paid together. The form fields use the first reservation's id; the upload
+// form splits the amount across the reservations when it is submitted.
 export function RecordPaymentCard({
-  reservation,
+  reservations,
   customer,
   settlementBalance,
 }: {
-  reservation: RecordPaymentReservation;
+  reservations: RecordPaymentReservation[];
   customer: RecordPaymentCustomer;
   settlementBalance?: number;
 }) {
-  const transaction = reservation.transaction;
+  const reservation = reservations[0];
+  const transaction = combinePaymentSummaries(
+    reservations.map((item) => item.transaction),
+  );
   const amountDue = settlementBalance ?? transaction.remainingBalance;
   const [amount, setAmount] = useState(() =>
     amountDue.toFixed(2),
@@ -49,10 +55,7 @@ export function RecordPaymentCard({
     <section className="rounded-3xl border border-border bg-white p-6 shadow-card">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.15em] text-gold-dark">
-            {reservation.reservation_no}
-          </p>
-          <h2 className="mt-1 font-serif text-2xl text-ink">
+          <h2 className="font-serif text-2xl text-ink">
             {customer.name ?? "Customer unavailable"}
           </h2>
           {customer.facebook_name && (
@@ -158,11 +161,14 @@ export function RecordPaymentCard({
           <Summary label="Paid toward remaining" value={transaction.paidTowardRemaining} />
         </dl>
       </div>}
-      <input
-        name={"updatedAt:" + reservation.id}
-        type="hidden"
-        value={reservation.updated_at}
-      />
+      {reservations.map((item) => (
+        <input
+          key={item.id}
+          name={"updatedAt:" + item.id}
+          type="hidden"
+          value={item.updated_at}
+        />
+      ))}
       <div className="mt-5 grid gap-5 md:grid-cols-2">
         <label className="block text-sm font-semibold text-ink">
           {settlementBalance === undefined ? "Payment amount" : "Settlement amount"}

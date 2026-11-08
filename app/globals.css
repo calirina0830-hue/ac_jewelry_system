@@ -16,6 +16,277 @@
   --shadow-card: 0 18px 50px rgba(39, 35, 30, 0.06);
 }
 
+/*
+ * Dark mode
+ * ---------
+ * The theme is chosen by the data-theme attribute on <html> ("light" or
+ * "dark"), set before first paint by the inline script in app/layout.tsx.
+ * Instead of adding a dark: variant to every class, dark mode re-points the
+ * color variables that Tailwind utilities read: the brand tokens above,
+ * white (used for card surfaces), and the status palettes, inverted
+ * 50<->950, 100<->900, and so on. So bg-red-50 + text-red-700 becomes a dark
+ * red tint with light red text. Palette values are copied from
+ * node_modules/tailwindcss/theme.css; to theme another palette (e.g. teal),
+ * add its inverted and original shades to both blocks below.
+ *
+ * Elements that must keep the light palette in dark mode (the always-dark
+ * sidebar, the photo viewer, printable invoice paper) use .theme-light.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #121110;
+  --color-white: #1c1a17;
+  --color-ink: #ede7dd;
+  --color-muted: #a39d94;
+  --color-border: #35312b;
+  --color-gold: #c99a52;
+  --color-gold-dark: #dcb478;
+  --color-gold-light: #a9864f;
+  --color-gold-soft: #2c2418;
+  --shadow-card: 0 18px 50px rgba(0, 0, 0, 0.35);
+  --color-stone-50: oklch(14.7% 0.004 49.25);
+  --color-stone-100: oklch(21.6% 0.006 56.043);
+  --color-stone-200: oklch(26.8% 0.007 34.298);
+  --color-stone-300: oklch(37.4% 0.01 67.558);
+  --color-stone-400: oklch(44.4% 0.011 73.639);
+  --color-stone-500: oklch(55.3% 0.013 58.071);
+  --color-stone-600: oklch(70.9% 0.01 56.259);
+  --color-stone-700: oklch(86.9% 0.005 56.366);
+  --color-stone-800: oklch(92.3% 0.003 48.717);
+  --color-stone-900: oklch(97% 0.001 106.424);
+  --color-stone-950: oklch(98.5% 0.001 106.423);
+  --color-neutral-50: oklch(14.5% 0 none);
+  --color-neutral-100: oklch(20.5% 0 none);
+  --color-neutral-200: oklch(26.9% 0 none);
+  --color-neutral-300: oklch(37.1% 0 none);
+  --color-neutral-400: oklch(43.9% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-600: oklch(70.8% 0 none);
+  --color-neutral-700: oklch(87% 0 none);
+  --color-neutral-800: oklch(92.2% 0 none);
+  --color-neutral-900: oklch(97% 0 none);
+  --color-neutral-950: oklch(98.5% 0 none);
+  --color-red-50: oklch(25.8% 0.092 26.042);
+  --color-red-100: oklch(39.6% 0.141 25.723);
+  --color-red-200: oklch(44.4% 0.177 26.899);
+  --color-red-300: oklch(50.5% 0.213 27.518);
+  --color-red-400: oklch(57.7% 0.245 27.325);
+  --color-red-500: oklch(63.7% 0.237 25.331);
+  --color-red-600: oklch(70.4% 0.191 22.216);
+  --color-red-700: oklch(80.8% 0.114 19.571);
+  --color-red-800: oklch(88.5% 0.062 18.334);
+  --color-red-900: oklch(93.6% 0.032 17.717);
+  --color-red-950: oklch(97.1% 0.013 17.38);
+  --color-amber-50: oklch(27.9% 0.077 45.635);
+  --color-amber-100: oklch(41.4% 0.112 45.904);
+  --color-amber-200: oklch(47.3% 0.137 46.201);
+  --color-amber-300: oklch(55.5% 0.163 48.998);
+  --color-amber-400: oklch(66.6% 0.179 58.318);
+  --color-amber-500: oklch(76.9% 0.188 70.08);
+  --color-amber-600: oklch(82.8% 0.189 84.429);
+  --color-amber-700: oklch(87.9% 0.169 91.605);
+  --color-amber-800: oklch(92.4% 0.12 95.746);
+  --color-amber-900: oklch(96.2% 0.059 95.617);
+  --color-amber-950: oklch(98.7% 0.022 95.277);
+  --color-emerald-50: oklch(26.2% 0.051 172.552);
+  --color-emerald-100: oklch(37.8% 0.077 168.94);
+  --color-emerald-200: oklch(43.2% 0.095 166.913);
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-emerald-400: oklch(59.6% 0.145 163.225);
+  --color-emerald-500: oklch(69.6% 0.17 162.48);
+  --color-emerald-600: oklch(76.5% 0.177 163.223);
+  --color-emerald-700: oklch(84.5% 0.143 164.978);
+  --color-emerald-800: oklch(90.5% 0.093 164.15);
+  --color-emerald-900: oklch(95% 0.052 163.051);
+  --color-emerald-950: oklch(97.9% 0.021 166.113);
+  --color-sky-50: oklch(29.3% 0.066 243.157);
+  --color-sky-100: oklch(39.1% 0.09 240.876);
+  --color-sky-200: oklch(44.3% 0.11 240.79);
+  --color-sky-300: oklch(50% 0.134 242.749);
+  --color-sky-400: oklch(58.8% 0.158 241.966);
+  --color-sky-500: oklch(68.5% 0.169 237.323);
+  --color-sky-600: oklch(74.6% 0.16 232.661);
+  --color-sky-700: oklch(82.8% 0.111 230.318);
+  --color-sky-800: oklch(90.1% 0.058 230.902);
+  --color-sky-900: oklch(95.1% 0.026 236.824);
+  --color-sky-950: oklch(97.7% 0.013 236.62);
+  --color-blue-50: oklch(28.2% 0.091 267.935);
+  --color-blue-100: oklch(37.9% 0.146 265.522);
+  --color-blue-200: oklch(42.4% 0.199 265.638);
+  --color-blue-300: oklch(48.8% 0.243 264.376);
+  --color-blue-400: oklch(54.6% 0.245 262.881);
+  --color-blue-500: oklch(62.3% 0.214 259.815);
+  --color-blue-600: oklch(70.7% 0.165 254.624);
+  --color-blue-700: oklch(80.9% 0.105 251.813);
+  --color-blue-800: oklch(88.2% 0.059 254.128);
+  --color-blue-900: oklch(93.2% 0.032 255.585);
+  --color-blue-950: oklch(97% 0.014 254.604);
+  --color-indigo-50: oklch(25.7% 0.09 281.288);
+  --color-indigo-100: oklch(35.9% 0.144 278.697);
+  --color-indigo-200: oklch(39.8% 0.195 277.366);
+  --color-indigo-300: oklch(45.7% 0.24 277.023);
+  --color-indigo-400: oklch(51.1% 0.262 276.966);
+  --color-indigo-500: oklch(58.5% 0.233 277.117);
+  --color-indigo-600: oklch(67.3% 0.182 276.935);
+  --color-indigo-700: oklch(78.5% 0.115 274.713);
+  --color-indigo-800: oklch(87% 0.065 274.039);
+  --color-indigo-900: oklch(93% 0.034 272.788);
+  --color-indigo-950: oklch(96.2% 0.018 272.314);
+  --color-violet-50: oklch(28.3% 0.141 291.089);
+  --color-violet-100: oklch(38% 0.189 293.745);
+  --color-violet-200: oklch(43.2% 0.232 292.759);
+  --color-violet-300: oklch(49.1% 0.27 292.581);
+  --color-violet-400: oklch(54.1% 0.281 293.009);
+  --color-violet-500: oklch(60.6% 0.25 292.717);
+  --color-violet-600: oklch(70.2% 0.183 293.541);
+  --color-violet-700: oklch(81.1% 0.111 293.571);
+  --color-violet-800: oklch(89.4% 0.057 293.283);
+  --color-violet-900: oklch(94.3% 0.029 294.588);
+  --color-violet-950: oklch(96.9% 0.016 293.756);
+}
+
+:root[data-theme="dark"] .theme-light,
+:root[data-theme="dark"] [data-print-root] {
+  color-scheme: light;
+  --color-canvas: #fafaf8;
+  --color-white: #fff;
+  --color-ink: #27231e;
+  --color-muted: #77736d;
+  --color-border: #e8e3db;
+  --color-gold: #b88a44;
+  --color-gold-dark: #8b642e;
+  --color-gold-light: #d7b77f;
+  --color-gold-soft: #f5eddf;
+  --shadow-card: 0 18px 50px rgba(39, 35, 30, 0.06);
+  --color-stone-50: oklch(98.5% 0.001 106.423);
+  --color-stone-100: oklch(97% 0.001 106.424);
+  --color-stone-200: oklch(92.3% 0.003 48.717);
+  --color-stone-300: oklch(86.9% 0.005 56.366);
+  --color-stone-400: oklch(70.9% 0.01 56.259);
+  --color-stone-500: oklch(55.3% 0.013 58.071);
+  --color-stone-600: oklch(44.4% 0.011 73.639);
+  --color-stone-700: oklch(37.4% 0.01 67.558);
+  --color-stone-800: oklch(26.8% 0.007 34.298);
+  --color-stone-900: oklch(21.6% 0.006 56.043);
+  --color-stone-950: oklch(14.7% 0.004 49.25);
+  --color-neutral-50: oklch(98.5% 0 none);
+  --color-neutral-100: oklch(97% 0 none);
+  --color-neutral-200: oklch(92.2% 0 none);
+  --color-neutral-300: oklch(87% 0 none);
+  --color-neutral-400: oklch(70.8% 0 none);
+  --color-neutral-500: oklch(55.6% 0 none);
+  --color-neutral-600: oklch(43.9% 0 none);
+  --color-neutral-700: oklch(37.1% 0 none);
+  --color-neutral-800: oklch(26.9% 0 none);
+  --color-neutral-900: oklch(20.5% 0 none);
+  --color-neutral-950: oklch(14.5% 0 none);
+  --color-red-50: oklch(97.1% 0.013 17.38);
+  --color-red-100: oklch(93.6% 0.032 17.717);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-red-500: oklch(63.7% 0.237 25.331);
+  --color-red-600: oklch(57.7% 0.245 27.325);
+  --color-red-700: oklch(50.5% 0.213 27.518);
+  --color-red-800: oklch(44.4% 0.177 26.899);
+  --color-red-900: oklch(39.6% 0.141 25.723);
+  --color-red-950: oklch(25.8% 0.092 26.042);
+  --color-amber-50: oklch(98.7% 0.022 95.277);
+  --color-amber-100: oklch(96.2% 0.059 95.617);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-amber-500: oklch(76.9% 0.188 70.08);
+  --color-amber-600: oklch(66.6% 0.179 58.318);
+  --color-amber-700: oklch(55.5% 0.163 48.998);
+  --color-amber-800: oklch(47.3% 0.137 46.201);
+  --color-amber-900: oklch(41.4% 0.112 45.904);
+  --color-amber-950: oklch(27.9% 0.077 45.635);
+  --color-emerald-50: oklch(97.9% 0.021 166.113);
+  --color-emerald-100: oklch(95% 0.052 163.051);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-emerald-500: oklch(69.6% 0.17 162.48);
+  --color-emerald-600: oklch(59.6% 0.145 163.225);
+  --color-emerald-700: oklch(50.8% 0.118 165.612);
+  --color-emerald-800: oklch(43.2% 0.095 166.913);
+  --color-emerald-900: oklch(37.8% 0.077 168.94);
+  --color-emerald-950: oklch(26.2% 0.051 172.552);
+  --color-sky-50: oklch(97.7% 0.013 236.62);
+  --color-sky-100: oklch(95.1% 0.026 236.824);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+  --color-sky-500: oklch(68.5% 0.169 237.323);
+  --color-sky-600: oklch(58.8% 0.158 241.966);
+  --color-sky-700: oklch(50% 0.134 242.749);
+  --color-sky-800: oklch(44.3% 0.11 240.79);
+  --color-sky-900: oklch(39.1% 0.09 240.876);
+  --color-sky-950: oklch(29.3% 0.066 243.157);
+  --color-blue-50: oklch(97% 0.014 254.604);
+  --color-blue-100: oklch(93.2% 0.032 255.585);
+  --color-blue-200: oklch(88.2% 0.059 254.128);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-blue-400: oklch(70.7% 0.165 254.624);
+  --color-blue-500: oklch(62.3% 0.214 259.815);
+  --color-blue-600: oklch(54.6% 0.245 262.881);
+  --color-blue-700: oklch(48.8% 0.243 264.376);
+  --color-blue-800: oklch(42.4% 0.199 265.638);
+  --color-blue-900: oklch(37.9% 0.146 265.522);
+  --color-blue-950: oklch(28.2% 0.091 267.935);
+  --color-indigo-50: oklch(96.2% 0.018 272.314);
+  --color-indigo-100: oklch(93% 0.034 272.788);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-indigo-500: oklch(58.5% 0.233 277.117);
+  --color-indigo-600: oklch(51.1% 0.262 276.966);
+  --color-indigo-700: oklch(45.7% 0.24 277.023);
+  --color-indigo-800: oklch(39.8% 0.195 277.366);
+  --color-indigo-900: oklch(35.9% 0.144 278.697);
+  --color-indigo-950: oklch(25.7% 0.09 281.288);
+  --color-violet-50: oklch(96.9% 0.016 293.756);
+  --color-violet-100: oklch(94.3% 0.029 294.588);
+  --color-violet-200: oklch(89.4% 0.057 293.283);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-violet-400: oklch(70.2% 0.183 293.541);
+  --color-violet-500: oklch(60.6% 0.25 292.717);
+  --color-violet-600: oklch(54.1% 0.281 293.009);
+  --color-violet-700: oklch(49.1% 0.27 292.581);
+  --color-violet-800: oklch(43.2% 0.232 292.759);
+  --color-violet-900: oklch(38% 0.189 293.745);
+  --color-violet-950: oklch(28.3% 0.141 291.089);
+}
+
+/* Invoice paper only: text with no color of its own would otherwise inherit
+   the page's light dark-mode text. Not for .theme-light, whose panels are
+   dark and set white text themselves. */
+:root[data-theme="dark"] [data-print-root] {
+  color: #27231e;
+}
+
+/* Keep Chrome's autofill from painting inputs its own blue. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-ink);
+  caret-color: var(--color-ink);
+  box-shadow: 0 0 0 1000px var(--color-white) inset;
+  transition: background-color 9999s ease-out;
+}
+
+/* Ink-tinted modal backdrops would turn light in dark mode; keep them dark. */
+:root[data-theme="dark"] .bg-ink\/40 {
+  background-color: rgb(0 0 0 / 0.55);
+}
+
+:root[data-theme="dark"] .bg-ink\/60 {
+  background-color: rgb(0 0 0 / 0.7);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -69,6 +340,36 @@ summary::-webkit-details-marker {
     );
 }
 
+/* Top loading bar (components/layout/navigation-progress.tsx): grows quickly
+   at first, then slows, so it always looks like it is still working. */
+.nav-progress {
+  transform-origin: left;
+  background: linear-gradient(90deg, #d7b77f, #f4d58d, #d7b77f);
+  background-size: 200% 100%;
+  box-shadow: 0 0 10px rgba(244, 213, 141, 0.75);
+  animation:
+    nav-progress 8s cubic-bezier(0.1, 0.8, 0.2, 1) forwards,
+    nav-progress-shine 1s linear infinite;
+}
+
+@keyframes nav-progress {
+  from {
+    transform: scaleX(0.12);
+  }
+  to {
+    transform: scaleX(0.92);
+  }
+}
+
+@keyframes nav-progress-shine {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 ::selection {
   background: rgba(184, 138, 68, 0.22);
 }
@@ -86,8 +387,8 @@ summary::-webkit-details-marker {
 
 @media print {
   @page {
-    size: A4;
-    margin: 12mm;
+    size: letter portrait;
+    margin: 0.5in;
   }
 
   html,
@@ -95,8 +396,33 @@ summary::-webkit-details-marker {
     background: white !important;
   }
 
+  body * {
+    visibility: hidden !important;
+  }
+
+  [data-print-modal],
+  [data-print-modal] > div,
+  [data-print-root],
+  [data-print-root] * {
+    visibility: visible !important;
+  }
+
   [data-print-hide] {
     display: none !important;
+  }
+
+  [data-print-modal] {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  [data-print-modal] > div {
+    max-width: none !important;
+    transform: none !important;
+    width: 100% !important;
   }
 
   main {
@@ -117,6 +443,11 @@ summary::-webkit-details-marker {
     color: var(--color-ink) !important;
     font-size: 10pt !important;
     line-height: 1.4 !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    overflow: visible !important;
+    zoom: 0.72 !important;
+    width: 138.8889% !important;
   }
 
   [data-print-root] * {

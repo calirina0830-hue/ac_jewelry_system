@@ -93,7 +93,7 @@ export function OrderDateEditor({
       />
       <div className="flex items-center gap-2">
         <button
-          className="inline-flex h-8 items-center rounded-lg bg-black px-3 text-xs font-bold text-white hover:bg-neutral-800 disabled:opacity-50"
+          className="inline-flex h-8 items-center rounded-lg bg-ink px-3 text-xs font-bold text-white hover:bg-gold-dark disabled:opacity-50"
           disabled={pending || !value}
           onClick={save}
           type="button"

@@ -1,6 +1,7 @@
 import { logoutAction } from "@/actions/auth";
 import { BrandMark } from "@/components/brand-mark";
 import { NavigationLinks } from "@/components/layout/navigation-links";
+import { ThemeToggle } from "@/components/theme/theme-controls";
 
 type AppNavigationProps = {
   userName: string;
@@ -35,7 +36,7 @@ function UserSummary({
 export function DesktopSidebar(props: AppNavigationProps) {
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-ink px-5 py-7 lg:flex"
+      className="theme-light fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-ink px-5 py-7 lg:flex"
       data-print-hide
     >
       <div className="px-3">
@@ -44,7 +45,8 @@ export function DesktopSidebar(props: AppNavigationProps) {
       <nav className="mt-12 space-y-1" aria-label="Primary navigation">
         <NavigationLinks />
       </nav>
-      <div className="mt-auto border-t border-white/10 pt-5">
+      <ThemeToggle className="mt-auto" tone="onDark" />
+      <div className="mt-5 border-t border-white/10 pt-5">
         <UserSummary {...props} />
         <form action={logoutAction}>
           <button
@@ -76,11 +78,12 @@ export function MobileHeader(props: AppNavigationProps) {
               <span className="block h-px w-5 bg-current" />
             </span>
           </summary>
-          <div className="absolute right-0 mt-3 w-72 rounded-2xl border border-border bg-ink p-4 shadow-2xl">
+          <div className="theme-light absolute right-0 mt-3 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-white/10 bg-ink p-4 shadow-2xl">
             <UserSummary {...props} />
             <nav className="mt-4 border-t border-white/10 pt-4">
               <NavigationLinks />
             </nav>
+            <ThemeToggle className="mt-4" tone="onDark" />
             <form action={logoutAction}>
               <button
                 className="mt-3 w-full rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-white/70"

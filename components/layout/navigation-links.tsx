@@ -4,13 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ACTIVE_LINKS = [
-  { href: "/dashboard", label: "Dashboard", mark: "D" },
-  { href: "/customers", label: "Customers", mark: "C" },
-  { href: "/stock", label: "Stock", mark: "S" },
   { href: "/reservations", label: "Reservations", mark: "R" },
+  { href: "/customers", label: "Customers", mark: "C" },
 ] as const;
-
-const FUTURE_LINKS = ["Reports"] as const;
 
 export function NavigationLinks() {
   const pathname = usePathname();
@@ -51,23 +47,6 @@ export function NavigationLinks() {
           </Link>
         );
       })}
-      <div className="my-3 border-t border-white/8" />
-      {FUTURE_LINKS.map((item) => (
-        <span
-          aria-disabled="true"
-          className="flex cursor-not-allowed items-center justify-between rounded-xl px-4 py-3 text-sm font-medium text-white/32"
-          key={item}
-          title="Available in a later phase"
-        >
-          <span className="flex items-center gap-3">
-            <span className="size-2 rounded-full border border-current" aria-hidden="true" />
-            {item}
-          </span>
-          <span className="text-[9px] font-bold uppercase tracking-wider">
-            Soon
-          </span>
-        </span>
-      ))}
     </>
   );
 }

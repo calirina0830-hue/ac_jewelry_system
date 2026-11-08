@@ -115,7 +115,7 @@ test("reservation export respects status filters", () => {
   assert.deepEqual(result.map((row) => row.reservation_no), ["RES-2026-000001"]);
 });
 
-test("reservation export respects customer and reservation-number search", () => {
+test("reservation export searches customers, not reservation numbers", () => {
   const customerResult = filterReservationExportRows(reservations, {
     q: "Rina",
     status: "all",
@@ -128,9 +128,7 @@ test("reservation export respects customer and reservation-number search", () =>
   });
 
   assert.equal(customerResult.length, 2);
-  assert.deepEqual(numberResult.map((row) => row.customer_name), [
-    "Dianna Lorraine",
-  ]);
+  assert.deepEqual(numberResult, []);
 });
 
 test("reservation export respects archive filters", () => {
@@ -233,8 +231,8 @@ test("stock export respects search, category, and archive filters", () => {
   );
 });
 
-test("export routes omit IDs, email, secrets, and stock quantity columns", async () => {
-  const [reservationRoute, stockRoute] = await Promise.all([
+test("export routes omit IDs, email, and secrets", async () => {
+  const [reservationRoute] = await Promise.all([
     readFile(
       new URL(
         "../app/(dashboard)/reservations/export/route.ts",
@@ -242,15 +240,8 @@ test("export routes omit IDs, email, secrets, and stock quantity columns", async
       ),
       "utf8",
     ),
-    readFile(
-      new URL("../app/(dashboard)/stock/export/route.ts", import.meta.url),
-      "utf8",
-    ),
   ]);
 
   assert.equal(reservationRoute.includes('"Customer Email"'), false);
   assert.equal(reservationRoute.includes('"Internal ID"'), false);
-  assert.equal(stockRoute.includes('"Quantity"'), false);
-  assert.equal(stockRoute.includes('"Jewelry Name"'), true);
-  assert.equal(stockRoute.includes('authorizeRoles(["admin", "staff"])'), true);
 });

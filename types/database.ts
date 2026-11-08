@@ -796,6 +796,23 @@ export type Database = {
         Args: { p_user_id: string; p_is_active: boolean };
         Returns: boolean;
       };
+      set_reservation_paid_amounts: {
+        Args: { p_amounts: unknown };
+        Returns: { updated: number };
+      };
+      set_reservation_paid_amount: {
+        Args: {
+          p_reservation_id: string;
+          p_expected_updated_at: string;
+          p_amount: MoneyInput;
+        };
+        Returns: {
+          reservationId: string;
+          totalPaid: number;
+          balance: number;
+          status: string;
+        };
+      };
       record_reservation_payment: {
         Args: {
           p_reservation_id: string;

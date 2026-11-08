@@ -1,6 +1,6 @@
 export function getSafeRedirectPath(
   value: string | null | undefined,
-  fallback = "/dashboard",
+  fallback = "/reservations",
 ): string {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
     return fallback;

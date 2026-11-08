@@ -38,23 +38,28 @@ export default async function BulkPaymentPage({
 }) {
   const query = await searchParams;
   const isSettlement = query.mode === "settle";
-  const profile = await getCurrentProfile();
-  if (!roleCanWrite(profile?.role)) {
-    redirect("/reservations?status=reserved&error=not-authorized");
-  }
-
   const idsResult = paymentBatchIdsSchema.safeParse(
     parseBulkPaymentIds(query.ids),
   );
+
+  // Load the permission check and the selected reservations at the same
+  // time; the permission check still runs before anything is shown.
+  const supabase = await createClient();
+  const [profile, { data: reservations }] = await Promise.all([
+    getCurrentProfile(),
+    idsResult.success
+      ? supabase
+          .from("reservations")
+          .select("id, reserved_at, customer_id, total, discount, downpayment, balance, pricing_complete, status, archived_at, delivered_at, updated_at")
+          .in("id", idsResult.data)
+      : Promise.resolve({ data: null }),
+  ]);
+  if (!roleCanWrite(profile?.role)) {
+    redirect("/reservations?status=reserved&error=not-authorized");
+  }
   if (!idsResult.success) {
     redirect("/reservations?status=reserved&error=invalid-bulk-selection");
   }
-
-  const supabase = await createClient();
-  const { data: reservations } = await supabase
-    .from("reservations")
-    .select("id, reservation_no, customer_id, total, discount, downpayment, balance, pricing_complete, status, archived_at, delivered_at, updated_at")
-    .in("id", idsResult.data);
   if (
     !reservations ||
     reservations.length !== idsResult.data.length ||
@@ -85,22 +90,46 @@ export default async function BulkPaymentPage({
   ) {
     redirect("/reservations?status=reserved&error=invalid-bulk-selection");
   }
-  const ordered = idsResult.data
-    .map((id) => reservations.find((item) => item.id === id))
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  // Same-name customers are compiled into one card, oldest reservation first
+  // so that a single payment fills the oldest balance before the next.
+  const normalizeName = (value: string | null | undefined) =>
+    (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const reservationsByCustomer = new Map<string, typeof reservations>();
+  for (const reservation of [...reservations].sort((a, b) =>
+    a.reserved_at.localeCompare(b.reserved_at),
+  )) {
+    const name = normalizeName(customerById.get(reservation.customer_id)?.name);
+    const key = name || reservation.customer_id;
+    reservationsByCustomer.set(key, [
+      ...(reservationsByCustomer.get(key) ?? []),
+      reservation,
+    ]);
+  }
+  const customerGroups = [...reservationsByCustomer.values()];
+  const dueFor = (reservation: (typeof reservations)[number]) =>
+    isSettlement
+      ? Number(reservation.balance)
+      : (transactionByReservation.get(reservation.id)?.remainingBalance ?? 0);
+  const paymentGroups = customerGroups.map((group) =>
+    group.map((reservation) => ({
+      id: reservation.id,
+      capacity: dueFor(reservation),
+      paid: transactionByReservation.get(reservation.id)?.totalPaid ?? 0,
+    })),
+  );
   return (
     <div className="mx-auto max-w-5xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
       <PageHeader
         description={
           isSettlement
             ? "Record the remaining balance for this delivered order."
-            : "Record a downpayment or another payment for each reservation. Partial balances remain Reserved."
+            : "Record a downpayment or another payment for each customer. Partial balances remain Reserved."
         }
         eyebrow="Reservation payments"
         title={
           isSettlement
             ? "Settle Delivered Order"
-            : ordered.length === 1
+            : customerGroups.length === 1
               ? "Record Payment"
               : "Bulk Payment Review"
         }
@@ -115,35 +144,41 @@ export default async function BulkPaymentPage({
           {ERROR_MESSAGES[query.error] ?? "The payment could not be recorded."}
         </div>
       )}
-      <PaymentUploadForm reservationIds={idsResult.data}>
+      <PaymentUploadForm paymentGroups={paymentGroups}>
         <input name="reservationIds" type="hidden" value={JSON.stringify(idsResult.data)} />
         {isSettlement && <input name="paymentMode" type="hidden" value="settle" />}
-        {ordered.map((reservation) => {
-          const customer = customerById.get(reservation.customer_id);
-          const transaction = transactionByReservation.get(reservation.id);
-          if (!transaction) return null;
+        {customerGroups.map((group) => {
+          const customer = customerById.get(group[0].customer_id);
           return (
             <RecordPaymentCard
-              key={reservation.id}
+              key={group[0].id}
               customer={{
                 name: customer?.name ?? null,
                 facebook_name: customer?.facebook_name ?? null,
               }}
-              reservation={{
-                id: reservation.id,
-                reservation_no: reservation.reservation_no,
-                updated_at: reservation.updated_at,
-                pricing_complete: reservation.pricing_complete,
-                transaction,
-              }}
-              settlementBalance={isSettlement ? Number(reservation.balance) : undefined}
+              reservations={group.flatMap((reservation) => {
+                const transaction = transactionByReservation.get(reservation.id);
+                return transaction
+                  ? [{
+                      id: reservation.id,
+                      updated_at: reservation.updated_at,
+                      pricing_complete: reservation.pricing_complete,
+                      transaction,
+                    }]
+                  : [];
+              })}
+              settlementBalance={
+                isSettlement
+                  ? group.reduce((total, item) => total + Number(item.balance), 0)
+                  : undefined
+              }
             />
           );
         })}
         <PaymentFormActions
           cancelHref={isSettlement ? "/reservations?status=delivered" : "/reservations?status=reserved"}
           pricingIncomplete={false}
-          reservationCount={ordered.length}
+          reservationCount={customerGroups.length}
         />
       </PaymentUploadForm>
     </div>

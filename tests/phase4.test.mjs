@@ -136,20 +136,12 @@ test("category and dashboard monitoring use database-derived snapshots", async (
 });
 
 test("reservation summaries keep customer name primary and social name secondary", async () => {
-  const [listPage, detailPage, form] = await Promise.all([
+  const [listPage] = await Promise.all([
     readFile(new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../components/reservations/reservation-form.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(listPage, /reservation\.customer_name/);
   assert.equal(listPage.includes("Facebook / CS:"), true);
-  assert.match(detailPage, /label="Customer name"/);
-  assert.equal(detailPage.includes('label="Facebook / CS"'), true);
-  assert.match(form, /label="Customer name"/);
-  assert.match(form, /label="Reservation number"/);
-  assert.match(form, /label="Status"/);
-  assert.match(form, /label="Quantity"/);
 });
 
 test("reservation operational views preserve status and search only seller identities", async () => {
@@ -161,7 +153,7 @@ test("reservation operational views preserve status and search only seller ident
   for (const status of ["reserved", "paid", "delivered", "cancelled"]) {
     assert.match(listPage, new RegExp('value: "' + status + '"'));
   }
-  assert.equal(listPage.includes("reservation_no.ilike"), true);
+  assert.equal(listPage.includes("reservation_no.ilike"), false);
   assert.equal(listPage.includes("customer_name.ilike"), true);
   assert.equal(listPage.includes("customer_facebook_name.ilike"), true);
   assert.equal(listPage.includes("customer_email.ilike"), false);
@@ -170,19 +162,14 @@ test("reservation operational views preserve status and search only seller ident
 });
 
 test("reservation selectors use bounded authenticated search without email labels", async () => {
-  const [form, options, stockRoute] = await Promise.all([
+  const [form, options] = await Promise.all([
     readFile(new URL("../components/reservations/reservation-form.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/reservations/form-options.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/reservation-options/stock/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.equal(form.includes('"/reservation-options/customers"'), true);
-  assert.equal(form.includes('"/reservation-options/stock"'), true);
   assert.equal(form.includes("/reservation-options/customers?q="), false);
-  assert.equal(form.includes("/reservation-options/stock?q="), false);
   assert.match(form, /method:\s*"POST"/);
-  assert.match(form, /Search jewelry item\.\.\./);
-  assert.match(form, /function JewelryItemCombobox/);
   assert.match(form, /ArrowDown/);
   assert.match(form, /onMouseDown/);
   assert.match(form, /candidate\.key !== item\.key/);
@@ -191,12 +178,25 @@ test("reservation selectors use bounded authenticated search without email label
   assert.equal(form.includes("Select customer"), false);
   assert.match(form, /Quantity/);
   assert.equal(form.includes("quantityInput"), true);
-  assert.match(form, /(?:Code|SKU):\s*<\/span>\s*\{option\.sku/);
   assert.equal(form.includes("customer.email"), false);
   assert.match(options, /INITIAL_OPTION_LIMIT = 30/);
-  assert.match(stockRoute, /name\.ilike/);
-  assert.match(stockRoute, /sku\.ilike/);
-  assert.equal(stockRoute.includes("availableQuantity"), false);
+});
+
+test("reservation creation locks catalog entries but does not enforce Stock quantity", async () => {
+  const migration = await readFile(catalogMigrationUrl, "utf8");
+  const prepareFunction = migration.match(
+    /create or replace function public\.prepare_reservation_items[\s\S]*?\$function\$;/i,
+  )?.[0];
+
+  assert.ok(prepareFunction);
+  assert.match(prepareFunction, /for update/i);
+  assert.match(
+    prepareFunction,
+    /not v_stock\.is_active\s+or v_stock\.archived_at is not null/i,
+  );
+  assert.match(prepareFunction, /v_unit_price \* v_quantity/i);
+  assert.doesNotMatch(prepareFunction, /v_stock\.quantity - v_held/i);
+  assert.doesNotMatch(prepareFunction, /insufficient_stock/i);
 });
 
 test("customer UI and search use name, Facebook / CS, and phone without email", async () => {
@@ -215,50 +215,4 @@ test("customer UI and search use name, Facebook / CS, and phone without email", 
   assert.equal(list.includes("email.ilike"), false);
   assert.equal(detail.includes('label="Email"'), false);
   assert.equal(action.includes('getTextField(formData, "email")'), false);
-});
-
-test("stock UI is catalog-only while actions preserve the legacy database quantity", async () => {
-  const [form, list, detail, dashboard, action] = await Promise.all([
-    readFile(new URL("../components/stock/stock-form.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(dashboard)/stock/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(dashboard)/stock/[id]/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(dashboard)/dashboard/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../actions/stock.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.equal(form.includes('name="quantity"'), false);
-  assert.equal(form.includes('name="isActive"'), false);
-  assert.equal(form.includes('label="Availability"'), false);
-  assert.equal(form.includes('name="price"'), false);
-  assert.equal(list.includes("formatCurrency"), false);
-  assert.equal(list.includes(">Quantity<"), false);
-  assert.equal(list.includes("Low stock"), false);
-  assert.equal(detail.includes('label="Quantity"'), false);
-  assert.equal(detail.includes("Low stock"), false);
-  assert.equal(dashboard.includes("Low stock"), false);
-  assert.equal(action.includes('getTextField(formData, "price")'), false);
-  assert.equal(action.includes("price: 0"), true);
-  assert.equal(action.includes("quantity: resolveStockQuantity()"), true);
-  assert.equal(
-    action.includes("quantity: resolveStockQuantity(existing.quantity)"),
-    true,
-  );
-  assert.equal(action.includes('isActive: existing.is_active ? "true" : "false"'), true);
-});
-
-test("reservation creation locks catalog entries but does not enforce Stock quantity", async () => {
-  const migration = await readFile(catalogMigrationUrl, "utf8");
-  const prepareFunction = migration.match(
-    /create or replace function public\.prepare_reservation_items[\s\S]*?\$function\$;/i,
-  )?.[0];
-
-  assert.ok(prepareFunction);
-  assert.match(prepareFunction, /for update/i);
-  assert.match(
-    prepareFunction,
-    /not v_stock\.is_active\s+or v_stock\.archived_at is not null/i,
-  );
-  assert.match(prepareFunction, /v_unit_price \* v_quantity/i);
-  assert.doesNotMatch(prepareFunction, /v_stock\.quantity - v_held/i);
-  assert.doesNotMatch(prepareFunction, /insufficient_stock/i);
 });

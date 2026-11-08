@@ -4,7 +4,7 @@ import { normalizeSearchText } from "@/lib/query";
 export type ReservationExportFilter = {
   q: string;
   liveBatch?: string;
-  status: "all" | ReservationStatus | "partially-paid" | "settled";
+  status: "all" | ReservationStatus | "partially-paid";
   archive: "active" | "archived" | "all";
   itemMatchIds?: readonly string[];
   partiallyPaidIds?: readonly string[];
@@ -12,7 +12,6 @@ export type ReservationExportFilter = {
 
 export type ReservationExportSource = {
   id: string;
-  reservation_no: string;
   customer_name: string;
   customer_facebook_name: string | null;
   status: ReservationStatus;
@@ -41,8 +40,6 @@ export function filterReservationExportRows<T extends ReservationExportSource>(
           Number(row.balance) > 0 &&
           row.delivered_at == null &&
           partiallyPaidIds?.has(row.id)
-        : filters.status === "settled"
-          ? row.delivered_at != null && Number(row.balance) === 0
         : filters.status === "all" || row.status === filters.status;
     const matchesArchive =
       filters.archive === "all" ||
@@ -52,7 +49,6 @@ export function filterReservationExportRows<T extends ReservationExportSource>(
     const matchesSearch =
       !search ||
       itemMatchIds?.has(row.id) ||
-      normalizeSearchText(row.reservation_no).includes(search) ||
       normalizeSearchText(row.customer_name).includes(search) ||
       normalizeSearchText(row.customer_facebook_name).includes(search);
     const matchesLiveBatch =

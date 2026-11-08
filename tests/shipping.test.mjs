@@ -144,18 +144,6 @@ test("invoice page exposes order dates and a PDF download", async () => {
   assert.equal(page.includes("/invoice/pdf"), true);
 });
 
-test("reservation detail page wires shipments and order-date editing", async () => {
-  const page = await readFile(
-    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.equal(page.includes("ShippingPanel"), true);
-  assert.equal(page.includes("OrderDateEditor"), true);
-  assert.equal(page.includes("reservation_shipments"), true);
-  assert.equal(page.includes("reservation_shipment_items"), true);
-});
-
 test("invoice document renders every item without dropping order dates", () => {
   const items = Array.from({ length: 120 }, (_, index) => ({
     description: "SKU-" + index + " - Ring - Gold",

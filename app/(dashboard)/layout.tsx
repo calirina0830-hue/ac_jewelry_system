@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 import {
   DesktopSidebar,
   MobileHeader,
 } from "@/components/layout/app-navigation";
+import { NavigationProgress } from "@/components/layout/navigation-progress";
 import { getCurrentProfile, requireUser } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
 
@@ -31,6 +32,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-canvas">
+      <Suspense fallback={null}>
+        <NavigationProgress />
+      </Suspense>
       <DesktopSidebar {...navigationProps} />
       <MobileHeader {...navigationProps} />
       <main className="lg:pl-72">{children}</main>

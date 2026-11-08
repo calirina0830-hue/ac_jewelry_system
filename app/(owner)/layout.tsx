@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { logoutAction } from "@/actions/auth";
 import { BrandMark } from "@/components/brand-mark";
+import { ThemeToggle } from "@/components/theme/theme-controls";
 import { authorizeOwner } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
 
@@ -27,7 +28,7 @@ export default async function OwnerLayout({
   const authorization = await authorizeOwner();
 
   if (!authorization) {
-    redirect("/dashboard?error=not-authorized");
+    redirect("/reservations?error=not-authorized");
   }
 
   const { user, profile } = authorization;
@@ -36,7 +37,7 @@ export default async function OwnerLayout({
 
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
-      <header className="bg-ink px-5 py-4 sm:px-8" data-print-hide>
+      <header className="theme-light bg-ink px-5 py-4 sm:px-8" data-print-hide>
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <BrandMark light />
@@ -50,7 +51,8 @@ export default async function OwnerLayout({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <ThemeToggle tone="onDark" />
             <span className="hidden text-right text-xs text-white/55 sm:block">
               Signed in as{" "}
               <span className="font-semibold text-white">{displayName}</span>
@@ -61,7 +63,7 @@ export default async function OwnerLayout({
             </span>
             <Link
               className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/80 transition hover:border-white/30 hover:bg-white/5 hover:text-white"
-              href="/dashboard"
+              href="/reservations"
             >
               Back to App
             </Link>

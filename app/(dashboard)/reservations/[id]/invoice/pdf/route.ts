@@ -39,14 +39,16 @@ export async function GET(
     entityType: "reservation",
     entityId: parsedId.data,
     description:
-      "Downloaded invoice PDF " + invoice.reservationNo + ".",
+      "Downloaded invoice PDF for " + invoice.document.customerName + ".",
   });
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Cache-Control": "private, no-store",
       "Content-Disposition":
-        'attachment; filename="' + invoice.reservationNo + '-invoice.pdf"',
+        'attachment; filename="invoice-' +
+        (invoice.document.customerName.replace(/[^a-zA-Z0-9]+/g, "-") || "customer") +
+        '.pdf"',
       "Content-Type": "application/pdf",
     },
   });

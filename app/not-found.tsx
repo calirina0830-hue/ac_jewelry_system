@@ -11,9 +11,9 @@ export default function NotFound() {
         </p>
         <Link
           className="mt-7 inline-flex rounded-xl bg-ink px-5 py-3 text-sm font-bold text-white"
-          href="/dashboard"
+          href="/reservations"
         >
-          Return to dashboard
+          Return to reservations
         </Link>
       </div>
     </main>

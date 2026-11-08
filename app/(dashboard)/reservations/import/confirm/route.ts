@@ -7,8 +7,49 @@ import { prepareLiveOrderPreview } from "@/lib/import/server";
 import {
   LIVE_IMPORT_MAX_BYTES,
   toConfirmationRows,
+  type DetectedNewProduct,
 } from "@/lib/import/live-orders";
 import { createClient } from "@/lib/supabase/server";
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+async function ensureImportedItems(
+  supabase: SupabaseClient,
+  products: DetectedNewProduct[],
+  createdBy: string,
+) {
+  for (const product of products) {
+    const sku = product.sku.trim();
+    const { data: existing, error: lookupError } = await supabase
+      .from("stock_items")
+      .select("id, is_active, archived_at")
+      .eq("sku", sku)
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+    if (existing) {
+      if (!existing.is_active || existing.archived_at) {
+        throw new Error("item_not_found:" + sku);
+      }
+      continue;
+    }
+
+    const { error: insertError } = await supabase.from("stock_items").insert({
+      sku,
+      name: product.name.trim(),
+      category: product.category,
+      price: product.price,
+      quantity: product.initialQuantity,
+      is_active: true,
+      description: "Created automatically from Live Order import.",
+      created_by: createdBy,
+    });
+
+    if (insertError && insertError.code !== "23505") {
+      throw insertError;
+    }
+  }
+}
 
 // TEMPORARY diagnostics for the Confirm Import failure investigation.
 // Logs only RPC error metadata and non-sensitive row context (item code /
@@ -92,6 +133,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Reservations still keep an internal catalog reference for shipping and
+    // item history, but users no longer need to complete a separate Stock step.
+    await ensureImportedItems(
+      supabase,
+      preview.detectedNewProducts,
+      authorized.user.id,
+    );
+
     const { data, error } = await supabase.rpc("confirm_live_order_import", {
       p_original_file_name: preview.fileName,
       p_file_hash: preview.fileHash,
@@ -115,7 +164,6 @@ export async function POST(request: Request) {
       );
     }
 
-    revalidatePath("/dashboard");
     revalidatePath("/reservations");
     revalidatePath("/reservations/import");
     revalidatePath("/reservations/import/history");

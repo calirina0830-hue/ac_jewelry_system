@@ -49,7 +49,6 @@ function revalidateReservation(id: string) {
   revalidatePath("/reservations/" + id);
   revalidatePath("/reservations/" + id + "/invoice");
   revalidatePath("/shipments");
-  revalidatePath("/dashboard");
 }
 
 function shipmentErrorMessage(message: string): string {

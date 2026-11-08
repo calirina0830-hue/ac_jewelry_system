@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { BrandMark } from "@/components/brand-mark";
+import { ThemeToggle } from "@/components/theme/theme-controls";
 import { BUSINESS } from "@/lib/constants/business";
 
 type AuthCardProps = {
@@ -20,7 +21,7 @@ export function AuthCard({
 }: AuthCardProps) {
   return (
     <main className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(520px,0.8fr)]">
-      <section className="relative hidden overflow-hidden bg-ink px-12 py-10 text-white lg:flex lg:flex-col">
+      <section className="theme-light relative hidden overflow-hidden bg-ink px-12 py-10 text-white lg:flex lg:flex-col">
         <div className="auth-glow" aria-hidden="true" />
         <BrandMark light />
         <div className="relative z-10 my-auto max-w-xl">
@@ -42,8 +43,9 @@ export function AuthCard({
         </p>
       </section>
 
-      <section className="flex min-h-screen items-center justify-center bg-canvas px-5 py-10 sm:px-10">
-        <div className="w-full max-w-md">
+      <section className="relative flex min-h-screen items-center justify-center bg-canvas px-5 py-10 sm:px-10">
+        <ThemeToggle className="absolute right-5 top-5 sm:right-10" />
+        <div className="w-full max-w-md pt-10 lg:pt-0">
           <div className="mb-10 lg:hidden">
             <BrandMark />
           </div>

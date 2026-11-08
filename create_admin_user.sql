@@ -1,13 +1,20 @@
-
 -- Create or Update user: adminrina / calisittieasia@gmail.com
+-- The password is never stored here. Run through setup_admin.sh, which asks for it.
+\set ON_ERROR_STOP on
+SELECT set_config('app.admin_password', :'admin_password', false);
+
 DO $$
 DECLARE
   v_user_id uuid;
   v_email text := 'calisittieasia@gmail.com';
   v_username text := 'adminrina';
-  v_password text := 'calicali000';
+  v_password text := nullif(current_setting('app.admin_password', true), '');
   v_role public.profile_role := 'admin';
 BEGIN
+  IF v_password IS NULL THEN
+    RAISE EXCEPTION 'admin password was not provided; run setup_admin.sh';
+  END IF;
+
   -- Check if user exists by email or previous adminrina id
   SELECT id INTO v_user_id FROM auth.users WHERE lower(email) = lower(v_email);
 

@@ -42,7 +42,7 @@ export async function ActivityView({
   const authorization = await authorizeOwner();
 
   if (!authorization) {
-    redirect("/dashboard?error=not-authorized");
+    redirect("/reservations?error=not-authorized");
   }
 
   const rawParams = await searchParams;

@@ -65,7 +65,6 @@ const FORMAT_DATE = new Intl.DateTimeFormat("en-US", {
 
 export function ShippingPanel({
   reservationId,
-  reservationNo,
   downpayment,
   usedDownpayment,
   reservedDownpayment,
@@ -77,7 +76,6 @@ export function ShippingPanel({
   discount: reservationDiscount = 0,
 }: {
   reservationId: string;
-  reservationNo: string;
   downpayment: number;
   usedDownpayment: number;
   reservedDownpayment: number;
@@ -394,9 +392,6 @@ export function ShippingPanel({
           <p className="text-xs font-medium uppercase tracking-wide text-muted">
             {FORMAT_DATE.format(new Date())}
           </p>
-          <p className="mt-1 text-sm font-semibold text-foreground">
-            {reservationNo}
-          </p>
         </div>
         <div className="rounded-2xl border border-border bg-muted/30 p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted">
@@ -689,9 +684,6 @@ export function ShippingPanel({
             >
               <div className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                    {reservationNo}
-                  </p>
                   <h2
                     id="release-invoice-modal-title"
                     className="text-lg font-semibold text-foreground"

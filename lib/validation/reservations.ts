@@ -65,7 +65,16 @@ function requiredMoneyInput(message: string) {
 
 export const reservationItemInputSchema = z.object({
   reservationItemId: optionalIdentifier,
-  stockItemId: z.string().uuid("Select a jewelry item."),
+  // Present on lines kept as they were; typed lines send itemName instead.
+  stockItemId: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() ? value.trim() : undefined),
+    z.string().uuid("Enter the item.").optional(),
+  ),
+  itemName: z.preprocess(
+    (value) =>
+      typeof value === "string" ? value.trim().replace(/\s+/g, " ") : undefined,
+    z.string().optional(),
+  ),
   quantity: z.coerce
     .number()
     .int("Enter a whole-number quantity.")
@@ -80,6 +89,16 @@ export const reservationItemInputSchema = z.object({
     )
     .optional(),
 }).superRefine((item, context) => {
+  if (!item.stockItemId) {
+    const length = item.itemName?.length ?? 0;
+    if (length < 2 || length > 160) {
+      context.addIssue({
+        code: "custom",
+        message: length ? "Item must be 2 to 160 characters." : "Enter the item.",
+        path: ["itemName"],
+      });
+    }
+  }
   if (item.discount > item.sellingPrice * item.quantity) {
     context.addIssue({
       code: "custom",
@@ -117,6 +136,18 @@ export const updateReservationSchema = reservationFieldsSchema.safeExtend({
     offset: true,
     error: "Invalid reservation version.",
   }),
+});
+
+export const reservationInvoiceItemsSchema = z.object({
+  id: z.string().uuid("Invalid reservation identifier."),
+  updatedAt: z.iso.datetime({
+    offset: true,
+    error: "Invalid reservation version.",
+  }),
+  items: z.array(reservationItemInputSchema).max(
+    MAX_RESERVATION_ITEMS,
+    "A reservation can contain at most " + MAX_RESERVATION_ITEMS + " items.",
+  ),
 });
 
 export const reservationIdSchema = z.string().uuid();
@@ -160,7 +191,7 @@ export const reservationQuerySchema = z.object({
   fromDate: reservationDateFilterSchema,
   toDate: reservationDateFilterSchema,
   status: z
-    .enum(["all", ...RESERVATION_STATUSES, "partially-paid", "settled"])
+    .enum(["all", ...RESERVATION_STATUSES, "partially-paid"])
     .catch("reserved"),
   archive: z.enum(["active", "archived", "all"]).catch("active"),
   sort: z

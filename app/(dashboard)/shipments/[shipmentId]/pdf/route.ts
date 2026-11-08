@@ -1,3 +1,4 @@
+import { formatItemLabel } from "@/lib/reservations/item-label";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -48,7 +49,7 @@ export async function GET(
   const [{ data: reservation }, { data: shipmentItems }] = await Promise.all([
     supabase
       .from("reservations")
-      .select("id, reservation_no, customer_id")
+      .select("id, customer_id")
       .eq("id", shipment.reservation_id)
       .maybeSingle(),
     supabase
@@ -133,7 +134,7 @@ export async function GET(
         : 0;
     return {
       description: line
-        ? line.sku + " - " + line.item_name + " - " + line.category
+        ? formatItemLabel({ sku: line.sku, name: line.item_name, category: line.category })
         : "Item no longer available",
       orderedAt: item.ordered_at,
       quantity,
@@ -150,7 +151,6 @@ export async function GET(
         SHIPMENT_STATUS_LABELS[shipment.status] ?? shipment.status,
       shipmentDate: shipment.created_at,
       shippedAt: shipment.shipped_at,
-      reservationNo: reservation.reservation_no,
       customerName: customer?.name ?? "Not provided",
       facebookName: customer?.facebook_name ?? null,
       phone: customer?.phone ?? null,

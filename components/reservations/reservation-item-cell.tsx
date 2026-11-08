@@ -1,60 +1,67 @@
-"use client";
+import { formatCurrency, formatOrderDateTime } from "@/lib/format";
 
-import { useState } from "react";
-
+import { formatItemLabel } from "@/lib/reservations/item-label";
 export type ReservationItemSummary = {
   sku: string;
   itemName: string;
   category: string;
+  orderedAt: string | null;
+  // Quantity and amount for the current tab (e.g. only the unreleased part
+  // in Reserved, only the released part in Delivered).
+  quantity: number;
+  amount: number;
+  pricePending: boolean;
 };
 
+/**
+ * Every item of a customer's order, listed inside one table row. The three
+ * columns (item, qty, amount) use fixed tracks so they line up from one
+ * customer row to the next.
+ */
 export function ReservationItemCell({
   items,
 }: {
   items: ReservationItemSummary[];
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const first = items[0];
-  const rest = items.slice(1);
-
-  if (!first) {
+  if (!items.length) {
     return <span className="text-sm text-muted">No items</span>;
   }
 
   return (
-    <div className="text-sm">
-      <p className="break-words font-semibold text-ink">
-        {first.sku + " - " + first.itemName + " - " + first.category}
-      </p>
-      {rest.length > 0 && !expanded && (
-        <button
-          aria-expanded={false}
-          className="mt-1 block text-xs font-bold text-gold-dark hover:underline"
-          onClick={() => setExpanded(true)}
-          type="button"
+    <ul className="divide-y divide-border/70 text-sm">
+      {items.map((item, index) => (
+        <li
+          className="grid grid-cols-[minmax(0,1fr)_2.5rem_6.5rem] items-baseline gap-x-3 py-1.5 first:pt-0 last:pb-0"
+          key={item.sku + "-" + index}
         >
-          {"+" + rest.length + " more"}
-        </button>
-      )}
-      {expanded &&
-        rest.map((item, index) => (
-          <p
-            className="mt-1 break-words font-semibold text-ink"
-            key={item.sku + "-" + index}
-          >
-            {item.sku + " - " + item.itemName + " - " + item.category}
-          </p>
-        ))}
-      {rest.length > 0 && expanded && (
-        <button
-          aria-expanded={true}
-          className="mt-1 block text-xs font-bold text-muted hover:text-ink hover:underline"
-          onClick={() => setExpanded(false)}
-          type="button"
-        >
-          Show less
-        </button>
-      )}
-    </div>
+          <div className="min-w-0">
+            <p className="break-words font-semibold leading-5 text-ink">
+              {formatItemLabel({
+                sku: item.sku,
+                name: item.itemName,
+                category: item.category,
+              })}
+            </p>
+            {item.orderedAt && (
+              <p className="text-[11px] leading-4 text-muted">
+                {formatOrderDateTime(item.orderedAt)}
+              </p>
+            )}
+          </div>
+          <span className="text-center tabular-nums text-muted">
+            ×{item.quantity}
+          </span>
+          <span className="text-right tabular-nums text-ink">
+            {item.pricePending ? (
+              <span className="text-xs font-semibold text-amber-700">
+                Price pending
+              </span>
+            ) : (
+              formatCurrency(item.amount)
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

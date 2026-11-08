@@ -362,7 +362,6 @@ export async function recordReservationPayments(
   }
 
   revalidatePath("/reservations");
-  revalidatePath("/dashboard");
   for (const id of ids) {
     revalidatePath("/reservations/" + id);
     revalidatePath("/reservations/" + id + "/invoice");
@@ -382,15 +381,11 @@ export async function recordReservationPayments(
     status: "success",
     redirectTo:
       isSettlement
-        ? "/reservations?status=settled&message=settled"
+        ? "/reservations?status=delivered&message=settled"
         : ids.length === 1
-        ? "/reservations/" + ids[0] + "?message=" + encodeURIComponent(
-            wasFullySettled
-              ? "Final payment recorded. Reservation is now Paid."
-              : "Payment recorded.",
-          )
-        : "/reservations?message=" +
-          encodeURIComponent(ids.length + " payment(s) recorded."),
+        ? "/reservations?message=" +
+          (wasFullySettled ? "payment-fully-recorded" : "payment-recorded")
+        : "/reservations?message=payment-recorded",
   };
 }
 
@@ -512,7 +507,6 @@ export async function editReservationPayment(
   }
 
   revalidatePath("/reservations");
-  revalidatePath("/dashboard");
   revalidatePath("/reservations/" + reservationId);
   revalidatePath("/reservations/" + reservationId + "/invoice");
   await logActivity(supabase, {
@@ -529,9 +523,7 @@ export async function editReservationPayment(
   return {
     status: "success",
     redirectTo:
-      "/reservations/" +
-      reservationId +
-      "?message=payment-edited",
+      "/reservations?message=payment-edited",
   };
 }
 
@@ -561,7 +553,7 @@ export async function voidReservationPayment(formData: FormData): Promise<void> 
   } catch (error) {
     logPaymentError("Payment void threw", error);
     redirect(
-      "/reservations/" + parsed.data.reservationId + "?error=payment-void-failed",
+      "/reservations?error=payment-void-failed",
     );
   }
 
@@ -593,7 +585,7 @@ export async function voidReservationPayment(formData: FormData): Promise<void> 
                           /could not find the function|schema cache/i.test(message)
                         ? "payment-void-migration-required"
                         : "payment-void-failed";
-    redirect("/reservations/" + parsed.data.reservationId + "?error=" + error);
+    redirect("/reservations?error=" + error);
   }
 
   const actualReservationId = getErrorField(result.data, "reservationId");
@@ -603,7 +595,6 @@ export async function voidReservationPayment(formData: FormData): Promise<void> 
       : parsed.data.reservationId;
 
   revalidatePath("/reservations");
-  revalidatePath("/dashboard");
   revalidatePath("/reservations/" + targetReservationId);
   revalidatePath("/reservations/" + targetReservationId + "/invoice");
   await logActivity(supabase, {
@@ -617,5 +608,5 @@ export async function voidReservationPayment(formData: FormData): Promise<void> 
     },
   });
 
-  redirect("/reservations/" + targetReservationId + "?message=payment-voided");
+  redirect("/reservations?message=payment-voided");
 }

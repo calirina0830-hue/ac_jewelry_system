@@ -44,7 +44,7 @@ export function LoginForm({
         </div>
       )}
       <ActionMessage state={state} />
-      <input name="next" type="hidden" value={next ?? "/dashboard"} />
+      <input name="next" type="hidden" value={next ?? "/reservations"} />
       <FormField
         autoComplete="username"
         autoCapitalize="none"

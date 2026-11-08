@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type") as EmailOtpType | null;
   const next = getSafeRedirectPath(
     request.nextUrl.searchParams.get("next"),
-    "/dashboard",
+    "/reservations",
   );
   const supabase = await createClient();
   let error: Error | null = null;

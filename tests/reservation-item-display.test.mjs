@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { formatItemLabel } from "../lib/reservations/item-label.ts";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -12,28 +13,20 @@ test("reservation item types carry the stock category", async () => {
   assert.match(types, /ReservationInitialItem[\s\S]*?category: string;/);
 });
 
-test("stock option sources expose the item category", async () => {
-  const [formOptions, route, database] = await Promise.all([
-    readFile(
-      new URL("../lib/reservations/form-options.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/reservation-options/stock/route.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../types/database.ts", import.meta.url), "utf8"),
-  ]);
+test("order form options no longer include a product catalog", async () => {
+  const formOptions = await readFile(
+    new URL("../lib/reservations/form-options.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(formOptions, /category: item\.category/);
-  assert.match(route, /category: item\.category/);
-  assert.match(database, /get_reservable_stock[\s\S]*?category: string;/);
+  assert.equal(formOptions.includes("stock"), false);
+  assert.equal(formOptions.includes("get_reservable_stock"), false);
 });
 
 test("reservation edit page loads the stored item category", async () => {
   const page = await readFile(
     new URL(
-      "../app/(dashboard)/reservations/[id]/edit/page.tsx",
+      "../lib/reservations/reservation-edit-data.ts",
       import.meta.url,
     ),
     "utf8",
@@ -42,28 +35,28 @@ test("reservation edit page loads the stored item category", async () => {
   assert.match(page, /category: item\.category \?\? ""/);
 });
 
-test("reservation form shows SKU, item name, and category per item", async () => {
+test("reservation form takes each item as typed text", async () => {
   const form = await readFile(
     new URL("../components/reservations/reservation-form.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(form, /const itemSku = selectedStock\?\.sku \?\? item\.sku;/);
-  assert.match(
-    form,
-    /const itemCategory = selectedStock\?\.category \?\? item\.category;/,
+  assert.match(form, /placeholder="Type the item"/);
+  assert.match(form, /itemName: item\.itemLabel/);
+  assert.equal(form.includes("JewelryItemCombobox"), false);
+  assert.equal(form.includes("/reservation-options/stock"), false);
+  assert.equal(form.includes("InlineStockModal"), false);
+});
+
+test("typed items display as entered; older items keep code and category", () => {
+  assert.equal(
+    formatItemLabel({ sku: "ITEM-abc123", name: "Rosegold ring", category: "Item" }),
+    "Rosegold ring",
   );
-  assert.match(form, /itemSku \? "SKU " \+ itemSku : "SKU —"/);
-  assert.match(
-    form,
-    /itemCategory \? "Category " \+ itemCategory : "Category —"/,
+  assert.equal(
+    formatItemLabel({ sku: "MSN", name: "MOISSANITE", category: "Necklace" }),
+    "MSN - MOISSANITE - Necklace",
   );
-  assert.match(form, /category: selected\.category/);
-  assert.match(form, /category: selected\?\.category \?\? ""/);
-  assert.match(form, /category: "",/);
-  assert.match(form, /SKU:\s*<\/span>\s*\{option\.sku/);
-  assert.match(form, /Item:\s*<\/span>\s*\{option\.name/);
-  assert.match(form, /Category:\s*<\/span>\s*<span[^>]*>\{option\.category/);
 });
 
 test("reservable stock RPC exposes the category column", async () => {

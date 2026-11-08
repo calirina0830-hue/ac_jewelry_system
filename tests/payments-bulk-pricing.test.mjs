@@ -604,13 +604,13 @@ test("individual and bulk payment eligibility keeps partial reservations payable
     false,
   );
 
-  const [list, detail, review, controls, notice] = await Promise.all([
+  const [list, groupActions, review, controls, notice] = await Promise.all([
     readFile(
       new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url),
       "utf8",
     ),
     readFile(
-      new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
+      new URL("../components/reservations/reservation-group-actions.tsx", import.meta.url),
       "utf8",
     ),
     readFile(
@@ -626,11 +626,11 @@ test("individual and bulk payment eligibility keeps partial reservations payable
       "utf8",
     ),
   ]);
-  assert.match(list, /canRecordReservationPayment\(reservation\)/);
+  // Per-row list actions live in the customer-row actions component.
+  assert.match(groupActions, /canRecordReservationPayment\(reservation\)/);
   assert.doesNotMatch(list, /canMarkReservationPaid|markReservationPaid|Mark Paid/);
-  assert.match(list, /needsReservationPricing\(reservation\)/);
-  assert.match(detail, /canRecordReservationPayment\(reservation\)/);
-  assert.doesNotMatch(detail, /canMarkReservationPaid|markReservationPaid|Mark as Paid/);
+  assert.doesNotMatch(groupActions, /canMarkReservationPaid|markReservationPaid|Mark Paid/);
+  assert.match(groupActions, /needsReservationPricing\(reservation\)/);
   assert.match(review, /reservations\.some\(\(item\) => !canRecordReservationPayment\(item\)\)/);
   assert.match(review, /roleCanWrite\(profile\?\.role\)/);
   assert.match(review, /idsResult\.data[\s\S]*?reservations\.find/);
@@ -711,17 +711,13 @@ test("payment flow resets after cancel, navigation, and reservation changes", as
 });
 
 test("payment evidence supports five previews and an accessible keyboard gallery", async () => {
-  const [input, viewer, detail, route, nextConfig] = await Promise.all([
+  const [input, viewer, route, nextConfig] = await Promise.all([
     readFile(
       new URL("../components/reservations/payment-evidence-input.tsx", import.meta.url),
       "utf8",
     ),
     readFile(
       new URL("../components/reservations/payment-evidence-viewer.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../app/payment-evidence/route.ts", import.meta.url), "utf8"),
@@ -732,9 +728,6 @@ test("payment evidence supports five previews and an accessible keyboard gallery
   assert.match(input, /MAX_PAYMENT_EVIDENCE_ATTACHMENTS/);
   assert.match(input, /Upload up to \{MAX_PAYMENT_EVIDENCE_ATTACHMENTS\} evidence images/);
   assert.match(input, /Remove/);
-  assert.match(detail, /PaymentEvidenceViewer/);
-  assert.match(detail, /evidenceByPayment/);
-  assert.match(detail, /getPaymentEvidenceUrl\(payment\.evidence_path\)/);
   assert.match(viewer, /aria-modal="true"/);
   assert.match(viewer, /role="dialog"/);
   assert.match(viewer, /event\.key === "Escape"/);
@@ -748,7 +741,6 @@ test("payment evidence supports five previews and an accessible keyboard gallery
   assert.match(viewer, /src=\{current\.url\}/);
   assert.match(route, /reservation_payment_evidence/);
   assert.match(nextConfig, /bodySizeLimit: "6mb"/);
-  assert.doesNotMatch(detail, /target="_blank"[\s\S]*?View Evidence/);
 });
 
 test("Paid to Reserved reason is required and the control remains interactive", async () => {
@@ -778,7 +770,7 @@ test("reservation filters combine search, status, and operational From and To da
   assert.match(page, /filters\.status === "paid"[\s\S]*?"paid_at"/);
   assert.match(page, /query = query\.gte/);
   assert.match(page, /query = query\.lt/);
-  assert.match(page, /reservation_no\.ilike/);
+  assert.doesNotMatch(page, /reservation_no\.ilike/);
   assert.match(page, /query = query\.eq\("status", filters\.status\)/);
   const filters = reservationQuerySchema.parse({
     q: "Rina",

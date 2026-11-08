@@ -7,7 +7,6 @@ import {
   clearReservationSearch,
   submitReservationSearch,
 } from "@/actions/private-search";
-import { RESERVATION_STATUS_OPTIONS } from "@/lib/constants/reservations";
 import { toSearchParams } from "@/lib/query";
 
 type FilterValues = {
@@ -102,10 +101,6 @@ export function ReservationFilters({
     }, 150);
   };
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateFilters({ status: e.target.value });
-  };
-
   const handleFromDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     updateFilters({ fromDate: e.target.value });
   };
@@ -128,30 +123,26 @@ export function ReservationFilters({
   const currentTo = searchParams.get("toDate") ?? initialFilters.toDate ?? "";
   const currentPageSize = searchParams.get("pageSize") ?? initialFilters.pageSize ?? "10";
 
+  // Records and page size are used rarely, so they sit behind "More filters".
+  // Open it automatically when either is set to a non-default value.
+  const hasMoreFilters = currentArchive !== "active" || currentPageSize !== "10";
+  const [moreOpen, setMoreOpen] = useState(hasMoreFilters);
+
+  const inputClass =
+    "h-10 w-full rounded-lg border border-border bg-white px-3 text-sm text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10";
+  const labelClass =
+    "mb-1 block text-[11px] font-bold uppercase tracking-[0.1em] text-muted";
+
   return (
     <form
       action={submitReservationSearch}
-      className="mt-6 grid items-end gap-3 rounded-2xl border border-border bg-white p-4 shadow-card sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(240px,1fr)_135px_135px_145px_155px_130px_auto_auto]"
+      className="mt-4 rounded-2xl border border-border bg-white p-3 shadow-card"
       onSubmit={() => {
         if (debounceTimerRef.current) {
           clearTimeout(debounceTimerRef.current);
         }
       }}
     >
-      <label className="block" htmlFor="reservation-search">
-        <span className="mb-1.5 flex items-center justify-between text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          <span>Search</span>
-          {isPending && <span className="text-[10px] lowercase text-gold font-normal">searching...</span>}
-        </span>
-        <input
-          className="h-11 w-full rounded-xl border border-border px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-search"
-          name="q"
-          onChange={handleSearchChange}
-          placeholder="Reservation no., customer, FB / CS name, SKU, or item name"
-          value={searchTerm}
-        />
-      </label>
       <input
         name="liveBatch"
         type="hidden"
@@ -167,99 +158,117 @@ export function ReservationFilters({
         type="hidden"
         value={searchParams.get("direction") ?? initialFilters.direction ?? ""}
       />
-      <label className="block" htmlFor="reservation-from-date">
-        <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          From Date
-        </span>
-        <input
-          className="block h-11 w-full rounded-xl border border-border px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-from-date"
-          name="fromDate"
-          onChange={handleFromDateChange}
-          type="date"
-          value={currentFrom}
-        />
-      </label>
-      <label className="block" htmlFor="reservation-to-date">
-        <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          To Date
-        </span>
-        <input
-          className="block h-11 w-full rounded-xl border border-border px-3 text-sm font-normal text-ink outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-to-date"
-          name="toDate"
-          onChange={handleToDateChange}
-          type="date"
-          value={currentTo}
-        />
-      </label>
-      <label className="block" htmlFor="reservation-status">
-        <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          Status
-        </span>
-        <select
-          className="h-11 w-full rounded-xl border border-border bg-white px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-status"
-          name="status"
-          onChange={handleStatusChange}
-          value={currentStatus}
-        >
-          <option value="all">All statuses</option>
-          {RESERVATION_STATUS_OPTIONS.map((status) => (
-            <option key={status.value} value={status.value}>
-              {status.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="block" htmlFor="reservation-archive">
-        <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          Records
-        </span>
-        <select
-          className="h-11 w-full rounded-xl border border-border bg-white px-4 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-archive"
-          name="archive"
-          onChange={handleArchiveChange}
-          value={currentArchive}
-        >
-          <option value="active">Active reservations</option>
-          <option value="archived">Archived reservations</option>
-          <option value="all">All records</option>
-        </select>
-      </label>
-      <label className="block" htmlFor="reservation-page-size">
-        <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
-          Page Size
-        </span>
-        <select
-          className="h-11 w-full rounded-xl border border-border bg-white px-3 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
-          id="reservation-page-size"
-          name="pageSize"
-          onChange={handlePageSizeChange}
-          value={currentPageSize}
-        >
-          <option value="10">10 per page</option>
-          <option value="20">20 per page</option>
-          <option value="50">50 per page</option>
-          <option value="all">See All</option>
-        </select>
-      </label>
-      <button
-        className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white transition hover:bg-ink/90 disabled:opacity-50"
-        disabled={isPending}
-        type="submit"
+      <input name="status" type="hidden" value={currentStatus} />
+
+      <div className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_150px_150px_auto]">
+        <label className="block sm:col-span-2 lg:col-span-1" htmlFor="reservation-search">
+          <span className={labelClass + " flex items-center justify-between"}>
+            <span>Search</span>
+            {isPending && (
+              <span className="text-[10px] font-normal normal-case text-gold">
+                searching...
+              </span>
+            )}
+          </span>
+          <input
+            className={inputClass}
+            id="reservation-search"
+            name="q"
+            onChange={handleSearchChange}
+            placeholder="Customer, FB / CS name, SKU or item"
+            type="search"
+            value={searchTerm}
+          />
+        </label>
+        <label className="block" htmlFor="reservation-from-date">
+          <span className={labelClass}>From</span>
+          <input
+            className={inputClass}
+            id="reservation-from-date"
+            name="fromDate"
+            onChange={handleFromDateChange}
+            type="date"
+            value={currentFrom}
+          />
+        </label>
+        <label className="block" htmlFor="reservation-to-date">
+          <span className={labelClass}>To</span>
+          <input
+            className={inputClass}
+            id="reservation-to-date"
+            name="toDate"
+            onChange={handleToDateChange}
+            type="date"
+            value={currentTo}
+          />
+        </label>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-1">
+          <button
+            className="h-10 rounded-lg bg-ink px-4 text-sm font-bold text-white transition hover:bg-ink/90 disabled:opacity-50"
+            disabled={isPending}
+            type="submit"
+          >
+            {isPending ? "Filtering..." : "Filter"}
+          </button>
+          <button
+            className="h-10 rounded-lg px-3 text-sm font-semibold text-muted transition hover:text-ink"
+            formAction={clearReservationSearch}
+            onClick={() => setSearchTerm("")}
+            type="submit"
+          >
+            Reset
+          </button>
+          <button
+            aria-controls="reservation-more-filters"
+            aria-expanded={moreOpen}
+            className={
+              "h-10 rounded-lg px-3 text-sm font-semibold transition " +
+              (hasMoreFilters ? "text-gold-dark" : "text-muted hover:text-ink")
+            }
+            onClick={() => setMoreOpen((open) => !open)}
+            type="button"
+          >
+            {moreOpen ? "Fewer filters" : "More filters"}
+            {hasMoreFilters && !moreOpen ? " •" : ""}
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="mt-2 grid gap-2 border-t border-border pt-3 sm:grid-cols-2 lg:max-w-md"
+        hidden={!moreOpen}
+        id="reservation-more-filters"
       >
-        {isPending ? "Filtering..." : "Apply"}
-      </button>
-      <button
-        className="inline-flex h-11 items-center justify-center rounded-xl border border-border px-4 text-sm font-semibold text-muted transition hover:border-gold hover:text-ink"
-        formAction={clearReservationSearch}
-        onClick={() => setSearchTerm("")}
-        type="submit"
-      >
-        Clear
-      </button>
+        <label className="block" htmlFor="reservation-archive">
+          <span className={labelClass}>Records</span>
+          <select
+            className={inputClass}
+            id="reservation-archive"
+            name="archive"
+            onChange={handleArchiveChange}
+            value={currentArchive}
+          >
+            <option value="active">Active reservations</option>
+            <option value="archived">Archived reservations</option>
+            <option value="all">All records</option>
+          </select>
+        </label>
+        <label className="block" htmlFor="reservation-page-size">
+          <span className={labelClass}>Customers per page</span>
+          <select
+            className={inputClass}
+            id="reservation-page-size"
+            name="pageSize"
+            onChange={handlePageSizeChange}
+            value={currentPageSize}
+          >
+            <option value="10">10 per page</option>
+            <option value="20">20 per page</option>
+            <option value="50">50 per page</option>
+            <option value="all">See all</option>
+          </select>
+        </label>
+      </div>
     </form>
   );
 }

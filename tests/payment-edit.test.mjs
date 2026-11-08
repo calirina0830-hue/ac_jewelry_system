@@ -38,7 +38,7 @@ test("payment edit validation accepts corrected amounts and optional details", (
 });
 
 test("payment corrections use an audited, locked database replacement", async () => {
-  const [migration, reliabilityMigration, roleFixMigration, action, detail, dialog, historyDialog] = await Promise.all([
+  const [migration, reliabilityMigration, roleFixMigration, action, dialog, historyDialog] = await Promise.all([
     readFile(
       new URL("../supabase/migrations/202610260001_edit_reservation_payment.sql", import.meta.url),
       "utf8",
@@ -52,7 +52,6 @@ test("payment corrections use an audited, locked database replacement", async ()
       "utf8",
     ),
     readFile(new URL("../actions/payments.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/reservations/edit-payment-record.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/reservations/payment-edit-history.tsx", import.meta.url), "utf8"),
   ]);
@@ -73,14 +72,6 @@ test("payment corrections use an audited, locked database replacement", async ()
   assert.match(action, /!currentPayment\.voided_at/);
   assert.match(action, /PGRST202[\s\S]*payment-edit-migration-required/);
   assert.match(action, /22P02[\s\S]*profile_role[\s\S]*payment-edit-migration-required/);
-  assert.match(detail, /<EditPaymentRecord/);
-  assert.match(detail, /Edited and replaced by payment/);
-  assert.match(
-    detail,
-    /visiblePayments = \(payments \?\? \[\]\)\.filter[\s\S]*!payment\.void_reason\?\.startsWith\("Edited and replaced by payment "\)/,
-  );
-  assert.match(detail, /visiblePayments\.map\(\(payment\)/);
-  assert.match(detail, /<PaymentEditHistory entries=\{editHistory\}/);
   assert.match(dialog, /Saving keeps the original record in the audit history as voided/);
   assert.match(dialog, /payment-edit-migration-required/);
   assert.match(historyDialog, /Edit history/);
@@ -168,7 +159,7 @@ test("remaining items with zero payable balance move to Paid", async () => {
 });
 
 test("payment deletion is audited and independent from downpayment commitments", async () => {
-  const [migration, separationMigration, page, action, notice] = await Promise.all([
+  const [migration, separationMigration, action, notice] = await Promise.all([
     readFile(
       new URL("../supabase/migrations/202610280001_delete_reservation_payment.sql", import.meta.url),
       "utf8",
@@ -178,10 +169,6 @@ test("payment deletion is audited and independent from downpayment commitments",
         "../supabase/migrations/202610300001_separate_downpayment_from_payments.sql",
         import.meta.url,
       ),
-      "utf8",
-    ),
-    readFile(
-      new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../actions/payments.ts", import.meta.url), "utf8"),
@@ -200,8 +187,6 @@ test("payment deletion is audited and independent from downpayment commitments",
   assert.doesNotMatch(migration, /downpayment\s*=/i);
   assert.match(migration, /set[\s\S]*balance = v_balance[\s\S]*status = v_new_status/i);
   assert.doesNotMatch(migration, /delete from public\.reservation_payments/i);
-  assert.match(page, /deleteReservationPayment\.bind/);
-  assert.match(page, />\s*Delete\s*<\/ConfirmAction>/);
   assert.match(action, /deduction_exceeds_paid[\s\S]*payment-delete-deduction-exceeds-paid/);
   assert.match(action, /PGRST202[\s\S]*payment-delete-migration-required/);
   assert.match(notice, /payment-delete-deduction-exceeds-paid/);

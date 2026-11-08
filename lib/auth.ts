@@ -29,6 +29,19 @@ const getProfileRecord = cache(async (userId: string) => {
 
 export const requireUser = cache(async () => {
   const supabase = await createClient();
+  // getUser() asks the Auth server (one network round trip) and is what
+  // actually authorizes the request. To avoid waiting for it before the
+  // profile query, read the user id from the session token first (checked
+  // locally) and start the profile lookup at the same time. The profile is
+  // only used if getUser() confirms the same user.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claimedUserId =
+    typeof claimsData?.claims.sub === "string" ? claimsData.claims.sub : null;
+  if (claimedUserId) {
+    // Warm the cached lookup; errors are handled where it is awaited below.
+    getProfileRecord(claimedUserId).catch(() => undefined);
+  }
+
   const {
     data: { user },
     error,

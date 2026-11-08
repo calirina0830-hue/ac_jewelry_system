@@ -22,6 +22,10 @@ import {
   validatePaymentEvidence,
   type PaymentEvidenceMetadata,
 } from "@/lib/storage/payment-evidence";
+import {
+  expandPaymentGroups,
+  type PaymentGroupMember,
+} from "@/lib/reservations/payment-allocation";
 import { createClient } from "@/lib/supabase/client";
 
 type PaymentSubmissionPhase = "idle" | "uploading" | "recording";
@@ -53,10 +57,10 @@ function getSelectedFiles(formData: FormData, reservationId: string): File[] {
 
 export function PaymentUploadForm({
   children,
-  reservationIds,
+  paymentGroups,
 }: {
   children: ReactNode;
-  reservationIds: string[];
+  paymentGroups: PaymentGroupMember[][];
 }) {
   const router = useRouter();
   const submittingRef = useRef(false);
@@ -72,11 +76,16 @@ export function PaymentUploadForm({
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    // Each customer entered one payment; split it per reservation here.
+    const { reservationIds, evidenceSourceById } = expandPaymentGroups(
+      formData,
+      paymentGroups,
+    );
     const filesByReservation = new Map(
-      reservationIds.map((reservationId) => [
-        reservationId,
-        getSelectedFiles(formData, reservationId),
-      ]),
+      reservationIds.map((reservationId) => {
+        const source = evidenceSourceById.get(reservationId);
+        return [reservationId, source ? getSelectedFiles(formData, source) : []];
+      }),
     );
     const selectedFileCount = [...filesByReservation.values()].reduce(
       (total, files) => total + files.length,

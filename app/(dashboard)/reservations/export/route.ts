@@ -19,7 +19,6 @@ import type { Database } from "@/types/database";
 const EXPORT_PAGE_SIZE = 1000;
 const DETAIL_BATCH_SIZE = 100;
 const HEADERS = [
-  "Reservation No.",
   "Customer Name",
   "Facebook / CS Name",
   "Status",
@@ -36,7 +35,6 @@ const HEADERS = [
 type ReservationListRow = Pick<
   Database["public"]["Views"]["reservation_list"]["Row"],
   | "id"
-  | "reservation_no"
   | "customer_name"
   | "customer_facebook_name"
   | "status"
@@ -69,7 +67,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("reservation_list")
       .select(
-        "id, reservation_no, customer_name, customer_facebook_name, status, total, downpayment, balance, reserved_at, archived_at, live_batch, delivered_at",
+        "id, customer_name, customer_facebook_name, status, total, downpayment, balance, reserved_at, archived_at, live_batch, delivered_at",
       )
       .order(filters.sort, { ascending: filters.direction === "asc" })
       .range(from, from + EXPORT_PAGE_SIZE - 1);
@@ -172,7 +170,7 @@ export async function GET(request: NextRequest) {
   const operationalDateColumn =
     filters.status === "paid"
       ? "paid_at"
-      : filters.status === "delivered" || filters.status === "settled"
+      : filters.status === "delivered"
         ? "delivered_at"
         : filters.status === "cancelled"
           ? "cancelled_at"
@@ -209,13 +207,10 @@ export async function GET(request: NextRequest) {
     datedRows.map((row) => {
       const dates = datesById.get(row.id);
       return [
-        row.reservation_no,
         row.customer_name,
         row.customer_facebook_name,
         filters.status === "partially-paid"
           ? "Partially Paid"
-          : filters.status === "settled"
-            ? "Settled"
           : getInvoiceStatusLabel(row.status),
         (itemsById.get(row.id) ?? []).join("; "),
         Number(row.total).toFixed(2),

@@ -238,7 +238,7 @@ export function BulkSubmitButton({
   children,
   tone = "neutral",
 }: {
-  operation: "cancel" | "deliver";
+  operation: "cancel" | "deliver" | "archive" | "delete";
   confirmation: string;
   children: ReactNode;
   tone?: "neutral" | "danger";

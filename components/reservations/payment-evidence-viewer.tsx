@@ -101,7 +101,7 @@ export function PaymentEvidenceViewer({
         <div
           aria-label="Payment evidence viewer"
           aria-modal="true"
-          className="fixed inset-0 z-[100] overflow-y-auto bg-black/85 p-4 sm:p-6"
+          className="theme-light fixed inset-0 z-[100] overflow-y-auto bg-black/85 p-4 sm:p-6"
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (!target.closest("[data-evidence-content]")) setOpen(false);

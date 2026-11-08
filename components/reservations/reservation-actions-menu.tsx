@@ -21,7 +21,16 @@ type MenuPosition = {
   top: number;
 };
 
-export function ReservationActionsMenu({ children }: { children: ReactNode }) {
+export function ReservationActionsMenu({
+  children,
+  label = "Manage",
+  compact = false,
+}: {
+  children: ReactNode;
+  label?: string;
+  // Small text-style trigger for use next to inline action links.
+  compact?: boolean;
+}) {
   const instanceId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -164,12 +173,16 @@ export function ReservationActionsMenu({ children }: { children: ReactNode }) {
         aria-controls={open ? instanceId + "-menu" : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold focus:outline-none focus:ring-4 focus:ring-gold/10"
+        className={
+          compact
+            ? "inline-flex items-center gap-1 rounded px-1 text-sm font-semibold text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+            : "inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-semibold text-ink transition hover:border-gold focus:outline-none focus:ring-4 focus:ring-gold/10"
+        }
         onClick={() => (open ? closeMenu() : openMenu())}
         ref={buttonRef}
         type="button"
       >
-        Manage
+        {label}
         <span aria-hidden="true" className="text-[10px] text-muted">
           &#9662;
         </span>

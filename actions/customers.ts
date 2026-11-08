@@ -86,7 +86,6 @@ export async function createCustomer(
   }
 
   revalidatePath("/customers");
-  revalidatePath("/dashboard");
   await logActivity(supabase, {
     action: "customer_created",
     entityType: "customer",
@@ -170,7 +169,6 @@ export async function updateCustomer(
 
   revalidatePath("/customers");
   revalidatePath("/customers/" + id);
-  revalidatePath("/dashboard");
   await logActivity(supabase, {
     action: "customer_edited",
     entityType: "customer",
@@ -211,7 +209,6 @@ export async function archiveCustomer(id: string): Promise<void> {
   });
   revalidatePath("/customers");
   revalidatePath("/customers/" + parsedId.data);
-  revalidatePath("/dashboard");
   redirect("/customers?message=archived");
 }
 
@@ -245,7 +242,6 @@ export async function restoreCustomer(id: string): Promise<void> {
   });
   revalidatePath("/customers");
   revalidatePath("/customers/" + parsedId.data);
-  revalidatePath("/dashboard");
   redirect("/customers?message=restored");
 }
 
@@ -314,7 +310,6 @@ export async function createCustomerInline(input: {
   }
 
   revalidatePath("/customers");
-  revalidatePath("/dashboard");
   revalidatePath("/reservations/new");
   await logActivity(supabase, {
     action: "customer_created",

@@ -29,7 +29,7 @@ export default async function AccountManagementPage({
   const authorization = await authorizeOwner();
 
   if (!authorization) {
-    redirect("/dashboard?error=not-authorized");
+    redirect("/reservations?error=not-authorized");
   }
 
   const supabase = await createClient();

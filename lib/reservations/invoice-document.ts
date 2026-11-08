@@ -43,7 +43,6 @@ export interface InvoiceReleasedSummary {
 
 export interface InvoiceDocumentInput {
   business: InvoiceDocumentBusiness;
-  invoiceNo: string;
   invoiceDate: string;
   statusLabel: string;
   delivered: boolean;
@@ -80,7 +79,6 @@ export interface ShipmentDocumentInput {
   shipmentStatus: string;
   shipmentDate: string;
   shippedAt: string | null;
-  reservationNo: string;
   customerName: string;
   facebookName: string | null;
   phone: string | null;
@@ -418,7 +416,6 @@ export function buildInvoiceDocDefinition(
         {
           width: "*",
           stack: [
-            metaRow("Invoice No", input.invoiceNo),
             metaRow("Date", formatManilaDate(input.invoiceDate)),
             metaRow("Status", input.statusLabel),
             metaRow("Delivery", input.delivered ? "Delivered" : "Not delivered"),
@@ -526,7 +523,6 @@ export function buildShipmentDocDefinition(
               isDeliveredInvoice ? "Delivery No" : "Shipment No",
               input.shipmentNo,
             ),
-            metaRow("Reservation No", input.reservationNo),
             metaRow("Status", input.shipmentStatus),
             metaRow(
               isDeliveredInvoice ? "Delivered At" : "Shipment Date",

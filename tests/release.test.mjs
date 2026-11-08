@@ -370,75 +370,10 @@ test("release downpayment can become COD but cannot be zero", async () => {
   assert.match(migration, /p_downpayment_applied\s*<=\s*0/i);
 });
 
-test("reservation detail page displays release quantities and downpayment", async () => {
-  const page = await readFile(
-    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
-    "utf8",
-  );
-
-  for (const fragment of [
-    "ReleaseStatusBadge",
-    "downpayment_applied",
-    "Remaining unapplied",
-    "Used on releases",
-    "shippedByItem",
-    "usedDownpayment",
-    "reservedDownpayment",
-    "discount",
-    "displayedPaidAmount",
-  ]) {
-    assert.equal(page.includes(fragment), true, fragment);
-  }
-  for (const removed of ["Released / Held", "outstanding after release"]) {
-    assert.equal(
-      page.includes(removed),
-      false,
-      "detail page must not show release amounts: " + removed,
-    );
-  }
-});
-
-test("reservation summary uses remaining items and active payment allocation", async () => {
-  const page = await readFile(
-    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(page, /calculatePaymentTransactionSummary/);
-  assert.match(page, /paymentTransaction\.remainingItemsSubtotal/);
-  assert.match(page, /paymentTransaction\.remainingReservationDiscount/);
-  assert.match(page, /paymentTransaction\.remainingItemsTotal/);
-  assert.match(page, /paymentTransaction\.remainingBalance/);
-  assert.match(page, /Payment breakdown/);
-  assert.match(
-    page,
-    /activePaymentTotal\s*-\s*usedDownpayment\s*-\s*reservedDownpayment/,
-  );
-});
-
-test("reservation details keep downpayment separate from item rows", async () => {
-  const page = await readFile(
-    new URL("../app/(dashboard)/reservations/[id]/page.tsx", import.meta.url),
-    "utf8",
-  );
-
-  for (const fragment of [
-    "Payment and downpayment details",
-    'label="Downpayment"',
-    'label="Applied to releases"',
-    'label="Open release hold"',
-    'label="Available downpayment"',
-  ]) {
-    assert.equal(page.includes(fragment), true, fragment);
-  }
-  assert.equal(page.includes("allocateDownpaymentByLineTotal"), false);
-  assert.equal(page.includes(">Downpayment</th>"), false);
-});
-
 test("reservation edit hides fully released items and shows downpayment details", async () => {
   const [page, form, types] = await Promise.all([
     readFile(
-      new URL("../app/(dashboard)/reservations/[id]/edit/page.tsx", import.meta.url),
+      new URL("../lib/reservations/reservation-edit-data.ts", import.meta.url),
       "utf8",
     ),
     readFile(
@@ -460,9 +395,7 @@ test("reservation edit hides fully released items and shows downpayment details"
   for (const fragment of [
     "fully released item",
     "name=\"downpayment\"",
-    "Downpayment is separate from payment records",
-    'label="Used downpayment"',
-    "Remaining balance for downpayment",
+    "initialValue?.amountPaid",
   ]) {
     assert.equal(form.includes(fragment), true, "form: " + fragment);
   }
@@ -487,7 +420,7 @@ test("reservation edits can change downpayment without changing payment records"
   ]);
 
   assert.equal(form.includes('name="downpayment"'), true);
-  assert.equal(form.includes("Downpayment is separate from payment records"), true);
+  assert.equal(form.includes("initialValue?.amountPaid"), true);
   assert.equal(
     actions.includes('"update_reservation_with_payment_adjustment"'),
     true,

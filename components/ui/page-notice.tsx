@@ -5,15 +5,20 @@ const MESSAGES: Record<string, string> = {
   restored: "Record restored successfully.",
   deleted: "Archived reservation permanently deleted.",
   "all-deleted": "All archived reservations were permanently deleted.",
+  "payment-recorded": "Payment recorded.",
+  "payment-fully-recorded": "Final payment recorded. The order is now Paid.",
+  "bulk-archived": "Selected orders were moved to Archived. You can restore them or delete them permanently there.",
+  "bulk-deleted": "Selected archived orders were permanently deleted.",
   "status-paid": "Reservation marked as paid.",
   "status-delivered": "Reservation marked as delivered.",
-  settled: "Payment settled. The order is now listed under Settled Orders.",
+  settled: "Payment settled. The order remains listed under Delivered.",
   "status-cancelled": "Reservation cancelled and its stock commitment released.",
   "payment-edited": "Payment record corrected. The original entry remains in the audit history.",
   "payment-voided": "Payment voided successfully. The original entry remains in the audit history.",
 };
 
 const ERRORS: Record<string, string> = {
+  "downpayment-not-saved": "The order was saved, but the downpayment change was not. Open Edit and try the downpayment again.",
   "not-authorized": "You do not have permission to perform that action.",
   "archive-failed": "The record could not be archived. Please try again.",
   "restore-failed": "The record could not be restored. Please try again.",

@@ -29,14 +29,13 @@ export default async function NewReservationPage() {
           className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
           role="alert"
         >
-          Customer or stock options could not be fully loaded. Confirm the Phase 3
+          Customer options could not be fully loaded. Confirm the Phase 3
           migration is applied before creating a reservation.
         </div>
       )}
       <section className="mt-7 rounded-3xl border border-border bg-white p-5 shadow-card sm:p-8">
         <ReservationForm
           customers={options.customers}
-          stockItems={options.stockItems}
         />
       </section>
     </div>

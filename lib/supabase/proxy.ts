@@ -94,7 +94,7 @@ export async function updateSession(request: NextRequest) {
 
     if (profileValid) {
       const dashboardUrl = request.nextUrl.clone();
-      dashboardUrl.pathname = "/dashboard";
+      dashboardUrl.pathname = "/reservations";
       dashboardUrl.search = "";
       return NextResponse.redirect(dashboardUrl);
     }

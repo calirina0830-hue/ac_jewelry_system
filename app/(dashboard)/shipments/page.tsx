@@ -84,9 +84,7 @@ export default async function ShipmentsPage({
       .from("reservation_list")
       .select("id")
       .or(
-        "reservation_no.ilike." +
-          pattern +
-          ",customer_name.ilike." +
+        "customer_name.ilike." +
           pattern +
           ",customer_facebook_name.ilike." +
           pattern,
@@ -117,7 +115,7 @@ export default async function ShipmentsPage({
   ] = await Promise.all([
     supabase
       .from("reservation_list")
-      .select("id, reservation_no, customer_name")
+      .select("id, customer_name")
       .in(
         "id",
         reservationIds.length ? reservationIds : [ZERO_UUID],
@@ -150,7 +148,6 @@ export default async function ShipmentsPage({
       id: shipment.id,
       shipmentNo: shipment.shipment_no,
       reservationId: shipment.reservation_id,
-      reservationNo: reservation?.reservation_no ?? "—",
       customerName: reservation?.customer_name ?? "—",
       status: shipment.status,
       downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
@@ -231,7 +228,7 @@ export default async function ShipmentsPage({
             defaultValue={search}
             id="shipment-search"
             name="q"
-            placeholder="Shipment no., reservation no., or customer name"
+            placeholder="Shipment no. or customer name"
           />
         </label>
         <label className="block" htmlFor="shipment-status">
@@ -280,7 +277,6 @@ export default async function ShipmentsPage({
                 <thead className="bg-canvas text-[11px] uppercase tracking-[0.14em] text-muted">
                   <tr>
                     <th className="px-6 py-4 font-bold">Shipment</th>
-                    <th className="px-5 py-4 font-bold">Reservation</th>
                     <th className="px-5 py-4 font-bold">Customer</th>
                     <th className="px-5 py-4 font-bold">Items</th>
                     <th className="px-5 py-4 font-bold">Units</th>
@@ -296,14 +292,6 @@ export default async function ShipmentsPage({
                     <tr className="transition hover:bg-canvas/70" key={shipment.id}>
                       <td className="whitespace-nowrap px-6 py-4 font-bold text-ink">
                         {shipment.shipmentNo}
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4">
-                        <Link
-                          className="font-semibold text-gold-dark hover:underline"
-                          href={"/reservations/" + shipment.reservationId}
-                        >
-                          {shipment.reservationNo}
-                        </Link>
                       </td>
                       <td className="whitespace-nowrap px-5 py-4 text-sm font-medium text-ink">
                         {shipment.customerName}
@@ -346,12 +334,6 @@ export default async function ShipmentsPage({
                             href={"/shipments/" + shipment.id + "/pdf"}
                           >
                             PDF
-                          </Link>
-                          <Link
-                            className="text-ink"
-                            href={"/reservations/" + shipment.reservationId}
-                          >
-                            View
                           </Link>
                         </div>
                       </td>

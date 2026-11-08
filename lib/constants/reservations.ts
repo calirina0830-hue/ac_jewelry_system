@@ -7,10 +7,8 @@ export const RESERVATION_STATUSES = [
 
 export const RESERVATION_STATUS_OPTIONS = [
   { value: "reserved", label: "Reserved" },
-  { value: "partially-paid", label: "Partially Paid" },
   { value: "paid", label: "Paid" },
   { value: "delivered", label: "Delivered" },
-  { value: "settled", label: "Settled Orders" },
   { value: "cancelled", label: "Cancelled" },
 ] as const;
 

@@ -36,13 +36,11 @@ export type InvoiceReleaseHistoryItem = {
 
 export function InvoiceReleaseModal({
   reservationId,
-  reservationNo,
   items,
   canRelease,
   history,
 }: {
   reservationId: string;
-  reservationNo: string;
   items: InvoiceReleaseItem[];
   canRelease: boolean;
   history: InvoiceReleaseHistoryItem[];
@@ -254,7 +252,7 @@ export function InvoiceReleaseModal({
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div>
                 <h2 className="font-serif text-xl font-bold text-ink">
-                  Release Items — {reservationNo}
+                  Release Items
                 </h2>
                 <p className="text-xs text-muted">
                   Select items and enter release details to hand over to customer.
@@ -543,7 +541,7 @@ export function InvoiceReleaseModal({
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <div>
                 <h2 className="font-serif text-xl font-bold text-ink">
-                  Release History — {reservationNo}
+                  Release History
                 </h2>
                 <p className="text-xs text-muted">
                   Previous release receipts and item handover records.

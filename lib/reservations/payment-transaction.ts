@@ -1,3 +1,4 @@
+import { formatItemLabel } from "@/lib/reservations/item-label";
 type TransactionItem = {
   id: string;
   sku: string;
@@ -133,7 +134,7 @@ export function calculatePaymentTransactionSummary({
     if (remainingQuantity > 0) {
       remainingItems.push({
         id: item.id,
-        label: [item.sku, item.itemName, item.category].filter(Boolean).join(" - "),
+        label: formatItemLabel({ sku: item.sku, name: item.itemName, category: item.category }),
         originalQuantity,
         releasedQuantity,
         remainingQuantity,

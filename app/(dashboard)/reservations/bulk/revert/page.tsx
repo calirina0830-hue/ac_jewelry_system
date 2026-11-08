@@ -30,7 +30,7 @@ export default async function RevertPaidReservationsPage({
   const supabase = await createClient();
   const { data: reservations } = await supabase
     .from("reservations")
-    .select("id, reservation_no, status, archived_at")
+    .select("id, status, archived_at")
     .in("id", parsed.data);
   if (
     !reservations ||
@@ -49,8 +49,7 @@ export default async function RevertPaidReservationsPage({
       />
       <section className="relative z-10 mt-7 rounded-3xl border border-red-200 bg-white p-6 shadow-card">
         <p className="text-sm font-bold text-red-800">
-          Reverting {reservations.length} Paid reservation(s):{" "}
-          {reservations.map((item) => item.reservation_no).join(", ")}
+          Reverting {reservations.length} Paid reservation(s).
         </p>
         <form action={bulkRevertPaidReservations} className="mt-5">
           <input name="reservationIds" type="hidden" value={JSON.stringify(parsed.data)} />
