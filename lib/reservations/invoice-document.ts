@@ -16,6 +16,7 @@ export interface PdfDocumentDefinition {
   defaultStyle: Record<string, unknown>;
   styles: Record<string, Record<string, unknown>>;
   footer: (currentPage: number, pageCount: number) => PdfContent;
+  background?: (currentPage: number) => PdfContent;
   content: PdfContent[];
 }
 

@@ -411,7 +411,7 @@ export function CustomerInvoicePreview({
         }}
       >
         <article
-          className="relative overflow-hidden rounded-3xl border border-border bg-white shadow-card"
+          className="relative overflow-hidden rounded-3xl border border-border bg-[#fbf5e9] shadow-card"
           data-print-root
           ref={invoiceRef}
         >
@@ -693,38 +693,40 @@ export function CustomerInvoicePreview({
               ))}
           </div>
 
-          <header className="flex flex-col gap-4 border-b border-border px-6 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-8">
+          <header className="flex flex-col gap-4 border-b-4 border-[#d9b15f] bg-gradient-to-r from-[#5c0c1b] via-[#7a1424] to-[#6a1020] px-6 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-8">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-dark">
+              <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#e9c46a]">
                 {BUSINESS.descriptor}
               </p>
-              <h2 className="mt-1 font-serif text-2xl text-ink">{BUSINESS.name}</h2>
+              <h2 className="mt-1 font-serif text-2xl text-[#fff7e6]">{BUSINESS.name}</h2>
             </div>
             <div className="text-xs sm:text-right">
-              <p className="font-serif text-2xl uppercase tracking-[0.1em] text-gold-dark">
+              <p className="inline-block rounded-full border-2 border-[#e9c46a] bg-[#fbf5e9] px-5 py-1 font-serif text-2xl uppercase tracking-[0.12em] text-[#7a1424]">
                 Invoice
               </p>
               {invoice.invoiceDate && (
-                <p className="mt-1 text-muted">
+                <p className="mt-2 text-[#f3e3c3]">
                   Latest order:{" "}
-                  <span className="font-semibold text-ink">
+                  <span className="font-semibold text-white">
                     {formatDate(invoice.invoiceDate)}
                   </span>
                 </p>
               )}
-              <p className="text-muted">
+              <p className="text-[#f3e3c3]">
                 Status:{" "}
-                <span className="font-semibold text-ink">{invoice.statusLabel}</span>
+                <span className="rounded-full bg-[#e9c46a] px-2 py-0.5 font-semibold text-[#7a1424]">
+                  {invoice.statusLabel}
+                </span>
               </p>
             </div>
           </header>
 
           <section className="grid gap-4 border-b border-border px-6 py-5 sm:grid-cols-[1fr_auto] sm:px-8">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold-dark">
+              <p className="inline-flex items-center rounded-r-full bg-gradient-to-r from-[#5c0c1b] to-[#7a1424] py-1 pl-4 pr-5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#fbe7b5]">
                 Order for
               </p>
-              <p className="mt-1 text-lg font-bold text-ink">{invoice.customerName}</p>
+              <p className="mt-2 font-serif text-xl font-bold text-[#7a1424]">{invoice.customerName}</p>
               {customerDetails.length > 0 && (
                 <dl className="mt-1 space-y-0.5 text-sm leading-5">
                   {customerDetails.map(([label, value]) => (
@@ -749,10 +751,10 @@ export function CustomerInvoicePreview({
           </section>
 
           <section className="px-6 py-5 sm:px-8">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-2xl border-2 border-[#e0b75a]">
               <table className="w-full min-w-[600px] border-collapse text-left">
                 <thead>
-                  <tr className="border-y border-gold/50 bg-gold-soft text-[10px] uppercase tracking-[0.12em] text-gold-dark">
+                  <tr className="bg-gradient-to-b from-[#8a1b2b] to-[#6a0f1e] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#fff3d6]">
                     <th className="w-8 px-3 py-2.5" data-print-hide>
                       <input
                         aria-label={allIncluded ? "Leave out all items" : "Include all items"}
@@ -843,11 +845,11 @@ export function CustomerInvoicePreview({
             <InvoiceTotal count label="Total quantity" value={displayInvoice.totals.quantity} />
             <InvoiceTotal emphasize label="Total item" value={displayInvoice.totals.total} />
             <InvoiceTotal label="Remaining downpayment" value={displayInvoice.totals.amountPaid} />
-            <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-gold/60 bg-gold-soft px-4 py-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-gold-dark">
+            <div className="mt-3 flex items-center justify-between gap-4 rounded-2xl border-2 border-[#e0b75a] bg-gradient-to-r from-[#5c0c1b] via-[#7a1424] to-[#5c0c1b] px-5 py-4 shadow-md">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#fbe7b5]">
                 {orderStatus.label === "Cancelled" ? "Order cancelled" : "Balance due"}
               </span>
-              <span className="whitespace-nowrap font-serif text-2xl font-bold tabular-nums text-ink">
+              <span className="whitespace-nowrap font-serif text-2xl font-bold tabular-nums text-[#f6dd9a]">
                 {orderStatus.label === "Cancelled"
                   ? "Nothing due"
                   : formatCurrency(displayInvoice.totals.balance)}
@@ -868,9 +870,12 @@ export function CustomerInvoicePreview({
             </details>
           )}
 
-          <footer className="border-t border-border bg-canvas/35 px-6 py-3 text-center sm:px-8">
-            <p className="text-xs text-muted">
-              Thank you for your business · {BUSINESS.name}
+          <footer className="border-t-4 border-[#d9b15f] bg-gradient-to-r from-[#5c0c1b] via-[#7a1424] to-[#5c0c1b] px-6 py-5 text-center sm:px-8">
+            <p className="font-serif text-base italic text-[#fff3d6]">
+              Thank you for shopping with
+            </p>
+            <p className="mt-1 font-serif text-lg font-bold uppercase tracking-[0.12em] text-[#e9c46a]">
+              {BUSINESS.name}!
             </p>
           </footer>
         </article>
@@ -895,7 +900,7 @@ function InvoiceTotal({
       className={
         "flex items-baseline justify-between gap-6 text-sm " +
         (emphasize
-          ? "mt-1 border-y border-gold/40 bg-gold-soft/70 px-3 py-2 font-bold text-ink"
+          ? "mt-1 border-y border-[#e0b75a] bg-gradient-to-r from-[#f3d98a] via-[#fbe9b8] to-[#f3d98a] px-3 py-2 font-bold text-[#2b1d1d]"
           : "border-b border-border/60 py-1.5 text-muted")
       }
     >
