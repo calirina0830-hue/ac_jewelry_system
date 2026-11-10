@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { logActivity } from "@/lib/activity";
 import { authorizeRoles } from "@/lib/auth";
+import { loadCustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { createClient } from "@/lib/supabase/server";
 import {
   cancelShipmentSchema,
@@ -198,12 +199,34 @@ export async function createItemRelease(
 
   const supabase = await createClient();
   const requestedDownpayment = Number(parsed.data.downpaymentApplied);
-  if (requestedDownpayment <= 0) {
+
+  // The amount typed for a release comes out of the customer's remaining
+  // downpayment. Past releases are read back here so the same money cannot be
+  // deducted twice.
+  const { data: releaseCustomer } = await supabase
+    .from("reservation_list")
+    .select("customer_name")
+    .eq("id", parsed.data.reservationId)
+    .maybeSingle();
+  const customerInvoice = releaseCustomer?.customer_name
+    ? await loadCustomerInvoice(supabase, releaseCustomer.customer_name)
+    : null;
+  if (!customerInvoice) {
     return {
       status: "error",
-      message: "A downpayment greater than ₱0.00 is required to release items.",
+      message: "Unable to check the customer's downpayment. Please try again.",
     };
   }
+  if (requestedDownpayment > customerInvoice.availableDownpayment + 0.005) {
+    return {
+      status: "error",
+      message:
+        "Only " +
+        formatReleaseCurrency(customerInvoice.availableDownpayment) +
+        " of downpayment is left for this customer.",
+    };
+  }
+
   const formattedDate = parsed.data.releaseDate.includes("T")
     ? parsed.data.releaseDate
     : parsed.data.releaseDate + "T12:00:00Z";
@@ -260,8 +283,8 @@ export async function createItemRelease(
     groupReleasedValueMap.set(actualResId, prevValue + itemValue);
   }
 
-  // Release downpayment is the amount paid for this handover. It is allowed
-  // to be less than the selected goods value so the remainder can be COD.
+  // The applied downpayment may be less than the selected goods value; the
+  // remainder is COD.
   const distinctResIds = Array.from(groupsByResId.keys());
   // Distribute the entered amount across reservation groups, capped only by
   // each group's released value.

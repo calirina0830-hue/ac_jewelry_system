@@ -5,6 +5,7 @@ import { z } from "zod";
 import { logActivity } from "@/lib/activity";
 import { authorizeRoles } from "@/lib/auth";
 import { BUSINESS } from "@/lib/constants/business";
+import { loadCustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { buildShipmentDocDefinition } from "@/lib/reservations/invoice-document";
 import { calculateRemainingDownpaymentBalance } from "@/lib/reservations/payment-transaction";
 import { renderPdf } from "@/lib/reservations/pdf";
@@ -113,13 +114,20 @@ export async function GET(
     (total, payment) => total + Number(payment.amount),
     0,
   );
-  const remainingDownpayment = calculateRemainingDownpaymentBalance(
-    totalPaid,
-    (allShipments ?? []).map((shipment) => ({
-      status: shipment.status,
-      downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
-    })),
-  );
+  // The customer's downpayment is one figure across their open orders. Once
+  // nothing is left to release there is no invoice, so use this order's own.
+  const customerInvoice = customer?.name
+    ? await loadCustomerInvoice(supabase, customer.name)
+    : null;
+  const remainingDownpayment =
+    customerInvoice?.availableDownpayment ??
+    calculateRemainingDownpaymentBalance(
+      totalPaid,
+      (allShipments ?? []).map((shipment) => ({
+        status: shipment.status,
+        downpaymentApplied: Number(shipment.downpayment_applied ?? 0),
+      })),
+    );
 
   const lineById = new Map((lineItems ?? []).map((line) => [line.id, line]));
   const items = shipmentItems.map((item) => {

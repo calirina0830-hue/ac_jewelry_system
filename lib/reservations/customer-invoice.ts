@@ -1,4 +1,10 @@
 import {
+  computeCycleTotals,
+  selectBillableOrders,
+  selectCurrentCycle,
+  type CycleOrderAmounts,
+} from "@/lib/reservations/customer-cycle";
+import {
   getInvoiceStatusLabel,
   getInvoiceTotals,
 } from "@/lib/reservations/invoice";
@@ -38,6 +44,12 @@ export type CustomerInvoice = {
     downpayment: number;
     balance: number;
   };
+  // Confirmed releases in the current computation, each with its own PDF.
+  releases: Array<{ id: string; shipmentNo: string }>;
+  // The most that new releases can still deduct.
+  availableDownpayment: number;
+  // Downpayment not yet used by a confirmed release.
+  unappliedDownpayment: number;
   editor: CustomerInvoiceEditor | null;
   // Active Reserved reservations that still have items on this invoice.
   editableReservations: Array<{
@@ -52,6 +64,9 @@ export type CustomerInvoice = {
     archived: boolean;
     balance: number;
     pricingComplete: boolean;
+    // What this reservation contributes to the invoice totals.
+    remainingGross: number;
+    remainingDiscount: number;
   }>;
   // Releases that were prepared but never confirmed, one entry per release.
   pendingReleases: Array<{
@@ -113,7 +128,7 @@ export async function loadCustomerInvoice(
     supabase
       .from("reservations")
       .select(
-        "id, customer_id, status, subtotal, discount, downpayment, total, balance, pricing_complete, notes, reserved_at, delivered_at, archived_at, updated_at",
+        "id, customer_id, status, subtotal, discount, downpayment, total, balance, pricing_complete, notes, reserved_at, delivered_at, archived_at, updated_at, created_at",
       )
       .in("id", reservationIds)
       .order("reserved_at", { ascending: false }),
@@ -132,7 +147,7 @@ export async function loadCustomerInvoice(
     supabase
       .from("reservation_shipments")
       .select(
-        "id, reservation_id, status, downpayment_applied, reservation_shipment_items(shipment_id, reservation_item_id, quantity)",
+        "id, shipment_no, reservation_id, status, downpayment_applied, created_at, reservation_shipment_items(shipment_id, reservation_item_id, quantity)",
       )
       .in("reservation_id", reservationIds),
     supabase
@@ -142,13 +157,6 @@ export async function loadCustomerInvoice(
   ]);
 
   if (!allReservations || !items) return null;
-
-  // A cancelled order no longer counts toward what the customer owes. Show
-  // cancelled reservations only when the customer has nothing else, so a
-  // cancelled-only customer can still be opened from the Cancelled tab.
-  const reservations = allReservations.some((r) => r.status !== "cancelled")
-    ? allReservations.filter((r) => r.status !== "cancelled")
-    : allReservations;
 
   const shipmentItems = (shipments ?? []).flatMap(
     (shipment) => shipment.reservation_shipment_items ?? [],
@@ -193,14 +201,79 @@ export async function loadCustomerInvoice(
     );
   }
 
+  // Only confirmed releases take items off the invoice, matching the
+  // reservations list. A pending (prepared, unconfirmed) release keeps its
+  // items here, flagged, so the invoice and the list always agree.
+  const shippedOf = (reservationId: string) =>
+    (shipmentsByReservation.get(reservationId) ?? []).filter(
+      (shipment) => shipment.status === "shipped",
+    );
+  const ledgersByReservation = new Map(
+    allReservations.map((reservation) => {
+      const shipped = shippedOf(reservation.id);
+      return [
+        reservation.id,
+        computeReleaseLedger(
+          (itemsByReservation.get(reservation.id) ?? []).map((item) => ({
+            id: item.id,
+            description: formatItemLabel({ sku: item.sku, name: item.item_name, category: item.category }),
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unit_price),
+            discount: Number(item.discount ?? 0),
+          })),
+          shipped.map((shipment) => ({
+            id: shipment.id,
+            status: shipment.status,
+            downpayment_applied: Number(shipment.downpayment_applied ?? 0),
+          })),
+          shipped.flatMap((shipment) =>
+            (shipmentLinesByShipment.get(shipment.id) ?? []).map((line) => ({
+              shipment_id: shipment.id,
+              reservation_item_id: line.reservation_item_id,
+              quantity: Number(line.quantity),
+            })),
+          ),
+        ),
+      ] as const;
+    }),
+  );
+
+  const activeReservations = selectBillableOrders(
+    allReservations,
+    (id) => shippedOf(id).length > 0,
+    (id) => (ledgersByReservation.get(id)?.remainingUnits ?? 0) > 0,
+  );
+
+  // Orders from a computation that already finished stay out of this invoice.
+  const currentCycleIds = new Set(
+    selectCurrentCycle(
+      activeReservations.map((reservation) => ({
+        id: reservation.id,
+        createdAt: reservation.created_at,
+        remainingUnits: ledgersByReservation.get(reservation.id)?.remainingUnits ?? 0,
+        lastReleaseAt:
+          shippedOf(reservation.id)
+            .map((shipment) => shipment.created_at)
+            .sort()
+            .at(-1) ?? null,
+      })),
+    ).map((order) => order.id),
+  );
+  const reservations = activeReservations.filter((reservation) =>
+    currentCycleIds.has(reservation.id),
+  );
+
   const documentItems: CustomerInvoiceItem[] = [];
   let subtotal = 0;
   let discount = 0;
   let total = 0;
   let quantity = 0;
-  let amountPaid = 0;
   let downpayment = 0;
-  let balance = 0;
+  const cycleOrders: CycleOrderAmounts[] = [];
+  const invoiceAmountsByReservation = new Map<
+    string,
+    { remainingGross: number; remainingDiscount: number }
+  >();
   const editorReservations: Array<{
     reservation: (typeof reservations)[number];
     items: CustomerInvoiceEditor["items"];
@@ -214,12 +287,6 @@ export async function loadCustomerInvoice(
   for (const reservation of reservations) {
     const reservationItems = itemsByReservation.get(reservation.id) ?? [];
     const allShipments = shipmentsByReservation.get(reservation.id) ?? [];
-    // Only confirmed releases take items off the invoice, matching the
-    // reservations list. A pending (prepared, unconfirmed) release keeps its
-    // items here, flagged, so the invoice and the list always agree.
-    const reservationShipments = allShipments.filter(
-      (shipment) => shipment.status === "shipped",
-    );
     const pendingByItem = new Map<string, { shipmentId: string; quantity: number }>();
     for (const shipment of allShipments) {
       if (shipment.status !== "pending") continue;
@@ -231,28 +298,8 @@ export async function loadCustomerInvoice(
         });
       }
     }
-    const lines = reservationShipments.flatMap((shipment) =>
-      (shipmentLinesByShipment.get(shipment.id) ?? []).map((line) => ({
-        shipment_id: shipment.id,
-        reservation_item_id: line.reservation_item_id,
-        quantity: Number(line.quantity),
-      })),
-    );
-    const ledger = computeReleaseLedger(
-      reservationItems.map((item) => ({
-        id: item.id,
-        description: formatItemLabel({ sku: item.sku, name: item.item_name, category: item.category }),
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unit_price),
-        discount: Number(item.discount ?? 0),
-      })),
-      reservationShipments.map((shipment) => ({
-        id: shipment.id,
-        status: shipment.status,
-        downpayment_applied: Number(shipment.downpayment_applied ?? 0),
-      })),
-      lines,
-    );
+    const ledger = ledgersByReservation.get(reservation.id);
+    if (!ledger) continue;
     const itemById = new Map(reservationItems.map((item) => [item.id, item]));
     const grossTotal = ledger.items.reduce((sum, item) => sum + item.grossValue, 0);
     const grossRemaining = ledger.items.reduce(
@@ -267,18 +314,28 @@ export async function loadCustomerInvoice(
     );
     const paid = activePaidByReservation.get(reservation.id) ?? 0;
     const reservationTotals = getInvoiceTotals(reservation, paid);
-    const remainingPaid = Math.max(
-      reservationTotals.amountPaid - ledger.downpaymentCommitted,
-      0,
-    );
+    invoiceAmountsByReservation.set(reservation.id, {
+      remainingGross: grossRemaining,
+      remainingDiscount: reservationDiscount,
+    });
+    cycleOrders.push({
+      remainingTotal,
+      releasedTotal: Math.max(
+        ledger.releasedSubtotal - (Number(reservation.discount) - reservationDiscount),
+        0,
+      ),
+      paid: reservationTotals.amountPaid,
+      appliedShipped: ledger.downpaymentCommitted,
+      appliedPending: allShipments
+        .filter((shipment) => shipment.status === "pending")
+        .reduce((sum, shipment) => sum + Number(shipment.downpayment_applied ?? 0), 0),
+    });
 
     subtotal += ledger.remainingSubtotal;
     discount += reservationDiscount;
     total += remainingTotal;
     quantity += ledger.remainingUnits;
-    amountPaid += reservationTotals.amountPaid;
     downpayment += Number(reservation.downpayment);
-    balance += Math.max(remainingTotal - remainingPaid, 0);
 
     const editableItems = [] as CustomerInvoiceEditor["items"];
     for (const ledgerItem of ledger.items) {
@@ -343,7 +400,15 @@ export async function loadCustomerInvoice(
     }
   }
 
-  if (!documentItems.length) return null;
+  // A customer with everything released still opens, to reach the release PDFs.
+  if (
+    !documentItems.length &&
+    !reservations.some((reservation) => shippedOf(reservation.id).length > 0)
+  ) {
+    return null;
+  }
+
+  const cycle = computeCycleTotals(cycleOrders);
 
   const customer =
     (customers ?? []).find(
@@ -371,7 +436,21 @@ export async function loadCustomerInvoice(
     items: documentItems.sort(
       (a, b) => new Date(a.orderedAt ?? 0).getTime() - new Date(b.orderedAt ?? 0).getTime(),
     ),
-    totals: { subtotal, discount, total, quantity, amountPaid, downpayment, balance },
+    totals: {
+      subtotal,
+      discount,
+      total,
+      quantity,
+      amountPaid: cycle.remainingDownpayment,
+      downpayment,
+      balance: cycle.remainingBalance,
+    },
+    releases: reservations
+      .flatMap((reservation) => shippedOf(reservation.id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((shipment) => ({ id: shipment.id, shipmentNo: shipment.shipment_no })),
+    availableDownpayment: cycle.availableDownpayment,
+    unappliedDownpayment: cycle.unappliedDownpayment,
     editor: editorReservation
       ? {
           reservationId: editorReservation.reservation.id,
@@ -388,6 +467,8 @@ export async function loadCustomerInvoice(
       archived: Boolean(reservation.archived_at),
       balance: Number(reservation.balance),
       pricingComplete: Boolean(reservation.pricing_complete),
+      remainingGross: invoiceAmountsByReservation.get(reservation.id)?.remainingGross ?? 0,
+      remainingDiscount: invoiceAmountsByReservation.get(reservation.id)?.remainingDiscount ?? 0,
     })),
     pendingReleases: [...pendingReleases.values()],
   };

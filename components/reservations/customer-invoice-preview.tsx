@@ -10,7 +10,14 @@ import { BUSINESS } from "@/lib/constants/business";
 import { formatCurrency, formatDate, formatOrderDateTime } from "@/lib/format";
 import type { CustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { formatItemLabel } from "@/lib/reservations/item-label";
-import { selectCustomerInvoiceItems } from "@/lib/reservations/customer-invoice-selection";
+import {
+  allocateAppliedDownpayment,
+  computeReleasePreview,
+} from "@/lib/reservations/customer-cycle";
+import {
+  getReleaseValue,
+  selectCustomerInvoiceItems,
+} from "@/lib/reservations/customer-invoice-selection";
 import { buildBulkPaymentHref } from "@/lib/reservations/payment-selection";
 import { canRoleTransitionReservation } from "@/lib/reservations/status";
 import type { ProfileRole } from "@/types/database";
@@ -106,7 +113,8 @@ export function CustomerInvoicePreview({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ActionMessage | null>(null);
   const [releaseDate, setReleaseDate] = useState(todayInputValue);
-  const [releaseDownpayments, setReleaseDownpayments] = useState<Record<string, string>>({});
+  const [releaseDownpayment, setReleaseDownpayment] = useState("");
+  const [releaseQuantities, setReleaseQuantities] = useState<Record<string, string>>({});
   const [releaseError, setReleaseError] = useState<string | null>(null);
 
   const includedIds = invoice.items
@@ -119,17 +127,45 @@ export function CustomerInvoicePreview({
     ? "&items=" + encodeURIComponent(includedIds.join(","))
     : "";
   const releasableItems = displayInvoice.items.filter((item) => item.canShip);
-  // One release per reservation; each needs its own downpayment amount.
+  // Full quantity unless a smaller one was typed; null when the entry is invalid.
+  const releaseQuantityOf = (item: CustomerInvoice["items"][number]) => {
+    const entered = releaseQuantities[item.id];
+    if (entered === undefined) return item.quantity;
+    const quantity = Number(entered);
+    return entered.trim() !== "" &&
+      Number.isInteger(quantity) &&
+      quantity >= 1 &&
+      quantity <= item.quantity
+      ? quantity
+      : null;
+  };
+  // One release per reservation. Value is after each order's discount, and is
+  // read from the full invoice so unticked items cannot change it.
   const releaseGroups = [...new Set(releasableItems.map((item) => item.reservationId))].map(
     (reservationId) => {
       const items = releasableItems.filter((item) => item.reservationId === reservationId);
       return {
         reservationId,
         items,
-        value: items.reduce((sum, item) => sum + item.lineTotal, 0),
+        value: getReleaseValue(
+          invoice,
+          items.map((item) => ({ item, quantity: releaseQuantityOf(item) ?? 0 })),
+        ),
       };
     },
   );
+  const releaseQuantity = releasableItems.reduce(
+    (sum, item) => sum + (releaseQuantityOf(item) ?? 0),
+    0,
+  );
+  const enteredDownpayment = Number(releaseDownpayment.trim() || "0");
+  const releasePreview = computeReleasePreview({
+    remainingTotal: invoice.totals.total,
+    unappliedDownpayment: invoice.unappliedDownpayment,
+    availableDownpayment: invoice.availableDownpayment,
+    releaseValue: releaseGroups.reduce((sum, group) => sum + group.value, 0),
+    applied: Number.isFinite(enteredDownpayment) ? Math.max(enteredDownpayment, 0) : 0,
+  });
   const payableReservationIds = [
     ...new Set(
       invoice.items
@@ -146,10 +182,16 @@ export function CustomerInvoicePreview({
   // the same rules again before changing anything.
   const movable = {
     delivered: invoice.reservations.filter(
-      (r) => !r.archived && canRoleTransitionReservation(role, r.status, "delivered"),
+      (r) =>
+        invoice.items.length > 0 &&
+        !r.archived &&
+        canRoleTransitionReservation(role, r.status, "delivered"),
     ),
     cancelled: invoice.reservations.filter(
-      (r) => !r.archived && canRoleTransitionReservation(role, r.status, "cancelled"),
+      (r) =>
+        invoice.items.length > 0 &&
+        !r.archived &&
+        canRoleTransitionReservation(role, r.status, "cancelled"),
     ),
   };
   const orderStatus = describeOrderStatus(invoice);
@@ -203,30 +245,40 @@ export function CustomerInvoicePreview({
     router.refresh();
   }
 
-  // Uses the same release rules as the release form on the reservation page:
-  // each release records the downpayment received for that handover
-  // (more than ₱0, at most the released items' value); the rest is COD.
+  // Each release deducts only the amount typed for it, from the customer's
+  // remaining downpayment and up to the released items' value. The rest is COD.
   async function releaseIncluded() {
     if (busy || releaseGroups.length === 0) return;
 
-    for (const group of releaseGroups) {
-      const amount = Number(releaseDownpayments[group.reservationId] ?? "");
-      if (!Number.isFinite(amount) || amount <= 0) {
-        setReleaseError(
-          "Enter the downpayment received" +
-            (releaseGroups.length > 1 ? " for order " + (releaseGroups.indexOf(group) + 1) : "") +
-            ". It must be more than ₱0.00.",
-        );
-        return;
-      }
-      if (amount > group.value + 0.005) {
-        setReleaseError(
-          "The downpayment cannot be more than the released items' value (" +
-            formatCurrency(group.value) +
-            ").",
-        );
-        return;
-      }
+    const invalidItem = releasableItems.find((item) => releaseQuantityOf(item) === null);
+    if (invalidItem) {
+      setReleaseError(
+        "Enter a quantity from 1 to " + invalidItem.quantity + " for " + invalidItem.itemName + ".",
+      );
+      return;
+    }
+
+    const entered = releaseDownpayment.trim();
+    const totalApplied = Number(entered);
+    if (entered === "" || !Number.isFinite(totalApplied) || totalApplied < 0) {
+      setReleaseError("Enter the applied downpayment. Enter 0 if none will be deducted.");
+      return;
+    }
+    if (totalApplied > releasePreview.releaseValue + 0.005) {
+      setReleaseError(
+        "The applied downpayment cannot be more than the released items' value (" +
+          formatCurrency(releasePreview.releaseValue) +
+          ").",
+      );
+      return;
+    }
+    if (totalApplied > invoice.availableDownpayment + 0.005) {
+      setReleaseError(
+        "Only " +
+          formatCurrency(invoice.availableDownpayment) +
+          " of downpayment is left for this customer.",
+      );
+      return;
     }
     if (!releaseDate) {
       setReleaseError("Enter the release date.");
@@ -236,19 +288,27 @@ export function CustomerInvoicePreview({
     setBusy(true);
     setMessage(null);
     setReleaseError(null);
-    for (const group of releaseGroups) {
+    const appliedByGroup = allocateAppliedDownpayment(
+      releaseGroups.map((group) => group.value),
+      totalApplied,
+    );
+    for (const [index, group] of releaseGroups.entries()) {
       const result = await createItemRelease(
         group.reservationId,
-        group.items.map((item) => ({ reservationItemId: item.id, quantity: item.quantity })),
+        group.items.map((item) => ({
+          reservationItemId: item.id,
+          quantity: releaseQuantityOf(item) ?? item.quantity,
+        })),
         releaseDate,
-        releaseDownpayments[group.reservationId],
+        appliedByGroup[index].toFixed(2),
       );
       if (result.status !== "success") {
         return finish({ status: "error", message: result.message });
       }
     }
     setExcludedIds([]);
-    setReleaseDownpayments({});
+    setReleaseDownpayment("");
+    setReleaseQuantities({});
     return finish({
       status: "success",
       message:
@@ -457,22 +517,38 @@ export function CustomerInvoicePreview({
                   Edit
                 </Link>
               )}
-            <span className="ml-auto flex items-center gap-2">
-              <a
-                className={secondaryButton}
-                href={printHref + itemsQuery}
-                rel="noreferrer"
-                target="_blank"
-              >
-                Print
-              </a>
-              <a
-                className={secondaryButton}
-                download
-                href={downloadHref + itemsQuery}
-              >
-                PDF
-              </a>
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              {invoice.items.length > 0 && (
+                <>
+                  <a
+                    className={secondaryButton}
+                    href={printHref + itemsQuery}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Print
+                  </a>
+                  <a
+                    className={secondaryButton}
+                    download
+                    href={downloadHref + itemsQuery}
+                  >
+                    Reserved PDF
+                  </a>
+                </>
+              )}
+              {invoice.releases.map((release, index) => (
+                <a
+                  className={secondaryButton}
+                  download
+                  href={"/shipments/" + release.id + "/pdf"}
+                  key={release.id}
+                  title={release.shipmentNo}
+                >
+                  Release PDF
+                  {invoice.releases.length > 1 ? " " + (invoice.releases.length - index) : ""}
+                </a>
+              ))}
               <Link
                 aria-label="Close invoice (Esc)"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full text-xl leading-none text-muted transition hover:bg-white hover:text-ink"
@@ -486,48 +562,75 @@ export function CustomerInvoicePreview({
             {confirming === "release" && (
               <div className="grid w-full gap-3 rounded-xl border border-gold/60 bg-white p-3 sm:grid-cols-[1fr_auto]">
                 <div className="space-y-2">
-                  {releaseGroups.map((group) => {
-                    const entered = Number(releaseDownpayments[group.reservationId] ?? "");
-                    const cod = Math.max(
-                      group.value - (Number.isFinite(entered) ? entered : 0),
-                      0,
-                    );
-                    return (
-                      <label
-                        className="flex flex-wrap items-center gap-2 text-sm"
-                        key={group.reservationId}
-                      >
+                  <p className="text-xs text-muted">
+                    Downpayment left for this customer:{" "}
+                    <strong className="text-ink">
+                      {formatCurrency(invoice.availableDownpayment)}
+                    </strong>
+                  </p>
+                  {releasableItems
+                    .filter((item) => item.quantity > 1)
+                    .map((item) => (
+                      <label className="flex flex-wrap items-center gap-2 text-sm" key={item.id}>
                         <span className="min-w-40 font-semibold text-ink">
-                          Downpayment received
-                          {releaseGroups.length > 1 ? " · Order " + (releaseGroups.indexOf(group) + 1) : ""}
+                          Qty to release · {item.itemName}
                         </span>
-                        <span className="inline-flex items-center rounded-lg border border-border px-2 focus-within:border-gold">
-                          <span className="text-muted">₱</span>
-                          <input
-                            autoFocus={group === releaseGroups[0]}
-                            className="h-9 w-28 bg-transparent px-1 text-right tabular-nums outline-none"
-                            inputMode="decimal"
-                            min="0"
-                            onChange={(event) => {
-                              setReleaseError(null);
-                              setReleaseDownpayments((current) => ({
-                                ...current,
-                                [group.reservationId]: event.target.value,
-                              }));
-                            }}
-                            placeholder="0.00"
-                            step="0.01"
-                            type="number"
-                            value={releaseDownpayments[group.reservationId] ?? ""}
-                          />
-                        </span>
+                        <input
+                          className="h-9 w-20 rounded-lg border border-border bg-transparent px-2 text-right tabular-nums outline-none focus:border-gold"
+                          inputMode="numeric"
+                          max={item.quantity}
+                          min="1"
+                          onChange={(event) => {
+                            setReleaseError(null);
+                            setReleaseQuantities((current) => ({
+                              ...current,
+                              [item.id]: event.target.value,
+                            }));
+                          }}
+                          step="1"
+                          type="number"
+                          value={releaseQuantities[item.id] ?? String(item.quantity)}
+                        />
                         <span className="text-xs text-muted">
-                          of {formatCurrency(group.value)} · COD on delivery:{" "}
-                          <strong className="text-ink">{formatCurrency(cod)}</strong>
+                          of {item.quantity} ·{" "}
+                          <strong className="text-ink">{formatCurrency(item.unitPrice)}</strong> each
                         </span>
                       </label>
-                    );
-                  })}
+                    ))}
+                  <label className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="min-w-40 font-semibold text-ink">Applied downpayment</span>
+                    <span className="inline-flex items-center rounded-lg border border-border px-2 focus-within:border-gold">
+                      <span className="text-muted">₱</span>
+                      <input
+                        autoFocus
+                        className="h-9 w-28 bg-transparent px-1 text-right tabular-nums outline-none"
+                        inputMode="decimal"
+                        min="0"
+                        onChange={(event) => {
+                          setReleaseError(null);
+                          setReleaseDownpayment(event.target.value);
+                        }}
+                        placeholder="0.00"
+                        step="0.01"
+                        type="number"
+                        value={releaseDownpayment}
+                      />
+                    </span>
+                  </label>
+                  <div className="max-w-sm">
+                    <InvoiceTotal count label="Released quantity" value={releaseQuantity} />
+                    <InvoiceTotal label="Released" value={releasePreview.releaseValue} />
+                    <InvoiceTotal label="Applied downpayment" value={releasePreview.applied} />
+                    <InvoiceTotal label="COD" value={releasePreview.cod} />
+                    <InvoiceTotal
+                      count
+                      label="Remaining quantity"
+                      value={invoice.totals.quantity - releaseQuantity}
+                    />
+                    <InvoiceTotal label="Remaining item total" value={releasePreview.remainingTotal} />
+                    <InvoiceTotal label="Remaining downpayment" value={releasePreview.remainingDownpayment} />
+                    <InvoiceTotal emphasize label="Remaining balance" value={releasePreview.remainingBalance} />
+                  </div>
                 </div>
                 <label className="flex items-center gap-2 text-sm sm:flex-col sm:items-start sm:gap-1">
                   <span className="font-semibold text-ink">Release date</span>
@@ -638,7 +741,9 @@ export function CustomerInvoicePreview({
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold-dark">
                   Notes
                 </p>
-                <p className="mt-1 whitespace-pre-wrap leading-6 text-ink">{invoice.notes}</p>
+                <p className="mt-1 inline-block whitespace-pre-wrap rounded bg-amber-200 px-3 py-1.5 text-xl font-bold leading-7 text-ink">
+                  {invoice.notes}
+                </p>
               </div>
             )}
           </section>
@@ -665,6 +770,13 @@ export function CustomerInvoicePreview({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/80 text-[13px]">
+                  {invoice.items.length === 0 && (
+                    <tr>
+                      <td className="py-6 text-center text-muted" colSpan={6}>
+                        All items have been released. See the Release PDF buttons above.
+                      </td>
+                    </tr>
+                  )}
                   {invoice.items.map((item) => {
                     const included = !excludedIds.includes(item.id);
                     return (
@@ -728,8 +840,9 @@ export function CustomerInvoicePreview({
             {displayInvoice.totals.discount > 0 && (
               <InvoiceTotal label="Discount" value={-displayInvoice.totals.discount} />
             )}
-            <InvoiceTotal emphasize label="Total" value={displayInvoice.totals.total} />
-            <InvoiceTotal label="Amount paid" value={displayInvoice.totals.amountPaid} />
+            <InvoiceTotal count label="Total quantity" value={displayInvoice.totals.quantity} />
+            <InvoiceTotal emphasize label="Total item" value={displayInvoice.totals.total} />
+            <InvoiceTotal label="Remaining downpayment" value={displayInvoice.totals.amountPaid} />
             <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-gold/60 bg-gold-soft px-4 py-3">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-gold-dark">
                 {orderStatus.label === "Cancelled" ? "Order cancelled" : "Balance due"}
@@ -770,10 +883,12 @@ function InvoiceTotal({
   label,
   value,
   emphasize = false,
+  count = false,
 }: {
   label: string;
   value: number;
   emphasize?: boolean;
+  count?: boolean;
 }) {
   return (
     <div
@@ -785,7 +900,9 @@ function InvoiceTotal({
       }
     >
       <span>{label}</span>
-      <span className="whitespace-nowrap tabular-nums">{formatCurrency(value)}</span>
+      <span className="whitespace-nowrap tabular-nums">
+        {count ? value : formatCurrency(value)}
+      </span>
     </div>
   );
 }

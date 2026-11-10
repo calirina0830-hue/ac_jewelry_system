@@ -289,8 +289,10 @@ test("Reserved tab includes partially paid reservations without a separate tab",
   assert.doesNotMatch(tabs, /partially-paid/);
   assert.match(
     reservedBranch,
-    /query = query\.eq\("status", "reserved"\)\.is\("delivered_at", null\)/,
+    /query = query\.in\("status", \["reserved", "paid"\]\)/,
   );
+  assert.match(page, /reservation\.status === "reserved" && reservation\.delivered_at == null/);
+  assert.match(page, /isPartlyReleased\(reservation\.id\)/);
   assert.doesNotMatch(reservedBranch, /query\.not\(/);
   assert.match(page, /const partiallyPaid =/);
   assert.match(page, /\) : partiallyPaid \? \(/);

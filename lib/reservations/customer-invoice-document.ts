@@ -98,8 +98,8 @@ function totalsBlock(invoice: CustomerInvoice): PdfContent {
     totalRow("Reservation Discount", formatCurrency(invoice.totals.discount)),
     totalRow("Total Quantity", String(invoice.totals.quantity)),
     { canvas: [{ type: "line", x1: 0, y1: 1, x2: 230, y2: 1, lineColor: BORDER }], margin: [0, 4, 0, 4] },
-    totalRow("Total", formatCurrency(invoice.totals.total), "totalStrong"),
-    totalRow("Amount Paid", formatCurrency(invoice.totals.amountPaid)),
+    totalRow("Total Item", formatCurrency(invoice.totals.total), "totalStrong"),
+    totalRow("Remaining Downpayment", formatCurrency(invoice.totals.amountPaid)),
   ];
 
   rows.push({
@@ -181,7 +181,9 @@ export function buildCustomerInvoiceDocDefinition(
           { stack: [customerCard(invoice)], margin: [0, 0, 8, 0] },
           { stack: [
             { text: "NOTES", style: "sectionLabel" },
-            { text: invoice.notes || "No notes recorded", fontSize: 7.5, color: invoice.notes ? INK : MUTED, margin: [0, 5, 0, 0] },
+            invoice.notes
+              ? { text: invoice.notes, fontSize: 13, bold: true, background: "#fde68a", color: INK, margin: [0, 5, 0, 0] }
+              : { text: "No notes recorded", fontSize: 7.5, color: MUTED, margin: [0, 5, 0, 0] },
           ], margin: [8, 0, 0, 0] },
         ]],
       },

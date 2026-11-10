@@ -115,6 +115,7 @@ export function ReservationForm({
   const [downpayment, setDownpayment] = useState(
     customerOrders?.paid ?? initialValue?.amountPaid ?? "0.00",
   );
+  const [additionalDownpayment, setAdditionalDownpayment] = useState("");
 
   // Modals for inline creation
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -567,6 +568,22 @@ export function ReservationForm({
               value={downpayment}
             />
           </div>
+          {initialValue && (
+            <div className="w-32">
+              <InputField
+                errors={state.fieldErrors?.additionalDownpayment}
+                inputMode="decimal"
+                label="Add downpayment"
+                min="0"
+                name="additionalDownpayment"
+                onChange={(event) => setAdditionalDownpayment(event.target.value)}
+                placeholder="0.00"
+                step="0.01"
+                type="number"
+                value={additionalDownpayment}
+              />
+            </div>
+          )}
           <div className="pb-1 text-sm">
             <p className="text-muted">Total</p>
             <p className="font-bold tabular-nums text-ink">
@@ -577,7 +594,12 @@ export function ReservationForm({
             <p className="text-muted">Balance</p>
             <p className="font-bold tabular-nums text-ink">
               {formatCurrency(
-                Math.max(customerTotalCents - (parseMoneyToCents(downpayment) ?? 0), 0) / 100,
+                Math.max(
+                  customerTotalCents -
+                    (parseMoneyToCents(downpayment) ?? 0) -
+                    (parseMoneyToCents(additionalDownpayment.trim() || "0") ?? 0),
+                  0,
+                ) / 100,
               )}
             </p>
           </div>

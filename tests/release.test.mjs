@@ -52,7 +52,7 @@ test("release selection rejects malformed downpayment amounts", () => {
   }
 });
 
-test("item release requires a positive downpayment", () => {
+test("item release accepts a typed downpayment, including zero", () => {
   const base = {
     reservationId,
     items: [{ reservationItemId: itemA, quantity: 1 }],
@@ -61,7 +61,7 @@ test("item release requires a positive downpayment", () => {
 
   assert.equal(
     releaseItemsSchema.safeParse({ ...base, downpaymentApplied: "0" }).success,
-    false,
+    true,
   );
   assert.equal(
     releaseItemsSchema.safeParse({ ...base, downpaymentApplied: "500" }).success,

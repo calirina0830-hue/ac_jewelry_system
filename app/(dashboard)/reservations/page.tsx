@@ -208,13 +208,8 @@ export default async function ReservationsPage({
   // Start independent classification and item-search reads together so the
   // main reservation query does not wait for them one after another.
   const classificationPromise =
-    isDeliveredView ||
     filters.status === "partially-paid"
-      ? supabase.rpc(
-          isDeliveredView
-            ? "get_fully_delivered_reservation_ids"
-            : "get_partially_paid_reservation_ids",
-        )
+      ? supabase.rpc("get_partially_paid_reservation_ids")
       : Promise.resolve({ data: null, error: null });
   const itemMatchPromise = search
     ? supabase
@@ -241,16 +236,13 @@ export default async function ReservationsPage({
   let query = supabase.from("reservation_list").select("*", { count: "exact" });
 
   if (isDeliveredView) {
-    // Delivered means every item has been released. A first release sets
-    // delivered_at, but partially released orders remain in Reserved.
-    query = query.in(
-      "id",
-      classificationIdList.length > 0
-        ? classificationIdList
-        : ["00000000-0000-0000-0000-000000000000"],
-    );
+    // Any release sets delivered_at. This tab lists only the released part of
+    // an order; its remaining items and downpayment stay in Reserved.
+    query = query.not("delivered_at", "is", null);
   } else if (filters.status === "reserved") {
-    query = query.eq("status", "reserved").is("delivered_at", null);
+    // Paid orders are read too: a partly released order stays here whatever
+    // its payment status. The row filter below applies the exact rule.
+    query = query.in("status", ["reserved", "paid"]);
   } else if (filters.status === "partially-paid") {
     // Partial payment is a derived state: the reservation must still be
     // Reserved, have an active payment, and retain a balance.
@@ -505,10 +497,17 @@ export default async function ReservationsPage({
     sort: sortColumn,
     direction: filters.direction,
   };
-  const visibleReservations = (reservations ?? []).filter(
-    (reservation) =>
-      (filters.status !== "paid" && filters.status !== "partially-paid") ||
-      (itemsByReservation.get(reservation.id)?.length ?? 0) > 0,
+  // A release records a delivery date, but the order stays in Reserved until
+  // every item is out. Items were already narrowed to unreleased ones here.
+  const isPartlyReleased = (reservationId: string) =>
+    downpaymentAppliedByReservation.has(reservationId) &&
+    (itemsByReservation.get(reservationId)?.length ?? 0) > 0;
+  const visibleReservations = (reservations ?? []).filter((reservation) =>
+    filters.status === "reserved"
+      ? (reservation.status === "reserved" && reservation.delivered_at == null) ||
+        isPartlyReleased(reservation.id)
+      : (filters.status !== "paid" && filters.status !== "partially-paid") ||
+        (itemsByReservation.get(reservation.id)?.length ?? 0) > 0,
   );
 
   type ReservationRow = NonNullable<typeof reservations>[number];
@@ -562,7 +561,7 @@ export default async function ReservationsPage({
       // In reserved view: if items were partially released, show the remaining items value,
       // unapplied downpayment, and balance due on remaining items.
       const hasShipments = downpaymentAppliedByReservation.has(reservation.id) || (releasedValueByReservation.get(reservation.id) ?? 0) > 0;
-      if (hasShipments && reservation.status === "reserved") {
+      if (hasShipments) {
         resTotal = remainingValueByReservation.get(reservation.id) ?? resTotal;
         const appliedDp = downpaymentAppliedByReservation.get(reservation.id) ?? 0;
         resPaid = Math.max(resPaid - appliedDp, 0);
@@ -1070,7 +1069,7 @@ export default async function ReservationsPage({
                             <ReservationStatus
                               appearance="text"
                               archived={allArchived}
-                              delivered={allDelivered}
+                              delivered={allDelivered && filters.status !== "reserved"}
                               status={primaryReservation.status}
                             />
                           ) : (

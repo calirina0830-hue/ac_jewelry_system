@@ -12,9 +12,11 @@ import {
   MANUAL_ITEM_CATEGORY,
   MANUAL_ITEM_SKU_PREFIX,
 } from "@/lib/reservations/item-label";
+import { allocateAppliedDownpayment } from "@/lib/reservations/customer-cycle";
 import {
   calculateReservationTotals,
   centsToDecimal,
+  parseMoneyToCents,
 } from "@/lib/reservations/money";
 import { canRoleTransitionReservation } from "@/lib/reservations/status";
 import { createClient } from "@/lib/supabase/server";
@@ -369,6 +371,7 @@ export async function updateReservation(
     .sort((a, b) => (a.reserved_at ?? "").localeCompare(b.reserved_at ?? ""))
     .map((row) => ({
       id: row.id,
+      status: row.status,
       totalCents:
         row.id === parsed.data.id ? totalCents : Math.round(Number(row.total) * 100),
       paidCents: activePayments
@@ -425,6 +428,32 @@ export async function updateReservation(
     : (allocations.find((order) => order.id === parsed.data.id)?.paidCents ?? 0);
   const editedCommittedCents =
     allocations.find((order) => order.id === parsed.data.id)?.committedCents ?? 0;
+
+  // "Add downpayment" is only the newest payment. It is saved as its own
+  // record on top of what was already paid, oldest order first.
+  const additionalCents = parseMoneyToCents(
+    getTextField(formData, "additionalDownpayment")?.trim() || "0",
+  );
+  const additionalRooms = allocations.map((order) =>
+    order.status === "reserved"
+      ? Math.max(
+          order.totalCents - (downpaymentChanged ? order.newPaidCents : order.paidCents),
+          0,
+        )
+      : 0,
+  );
+  const additionalRoomCents = additionalRooms.reduce((sum, room) => sum + room, 0);
+  if (additionalCents === null || additionalCents < 0) {
+    const message = "Enter a valid amount.";
+    return { status: "error", message, fieldErrors: { additionalDownpayment: [message] } };
+  }
+  if (additionalCents > additionalRoomCents) {
+    const message =
+      "Add downpayment cannot be more than the balance of " +
+      centsToDecimal(additionalRoomCents) +
+      ".";
+    return { status: "error", message, fieldErrors: { additionalDownpayment: [message] } };
+  }
 
   const { data: reservationId, error } = await supabase.rpc(
     "update_reservation_with_payment_adjustment",
@@ -487,6 +516,43 @@ export async function updateReservation(
         new_amount: centsToDecimal(newPaidCents),
       },
     });
+  }
+
+  if (additionalCents > 0) {
+    const shares = allocateAppliedDownpayment(additionalRooms, additionalCents);
+    for (const [index, order] of allocations.entries()) {
+      if (shares[index] <= 0) continue;
+      // The save above moved the order's version, so read the current one.
+      const { data: current } = await supabase
+        .from("reservations")
+        .select("updated_at")
+        .eq("id", order.id)
+        .maybeSingle();
+      const { error: paymentError } = current
+        ? await supabase.rpc("record_reservation_payment", {
+            p_reservation_id: order.id,
+            p_expected_updated_at: current.updated_at,
+            p_amount: centsToDecimal(shares[index]),
+            p_payment_method: null,
+            p_reference_no: null,
+            p_notes: "Additional downpayment entered in Edit order.",
+            p_evidence: [],
+          })
+        : { error: { code: "not-found", message: "reservation_not_found" } };
+      if (paymentError) {
+        console.error("Additional downpayment failed:", paymentError.code, paymentError.message);
+        redirect(returnTo + "error=downpayment-not-saved");
+      }
+      await logActivity(supabase, {
+        action: "payment_recorded",
+        entityType: "reservation",
+        entityId: order.id,
+        description:
+          "Added a downpayment of " + centsToDecimal(shares[index]) + " in Edit order.",
+        metadata: { amount: centsToDecimal(shares[index]) },
+      });
+    }
+    revalidateReservationPaths(reservationId);
   }
   redirect(returnTo + "message=updated");
 }
