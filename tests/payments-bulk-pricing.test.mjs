@@ -627,7 +627,8 @@ test("individual and bulk payment eligibility keeps partial reservations payable
     ),
   ]);
   // Per-row list actions live in the customer-row actions component.
-  assert.match(groupActions, /canRecordReservationPayment\(reservation\)/);
+  // Payments are recorded from the Edit window; the row has no Pay link.
+  assert.doesNotMatch(groupActions, /key="pay"/);
   assert.doesNotMatch(list, /canMarkReservationPaid|markReservationPaid|Mark Paid/);
   assert.doesNotMatch(groupActions, /canMarkReservationPaid|markReservationPaid|Mark Paid/);
   assert.match(groupActions, /needsReservationPricing\(reservation\)/);

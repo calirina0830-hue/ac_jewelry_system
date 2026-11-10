@@ -7,10 +7,7 @@ import {
   restoreReservation,
 } from "@/actions/reservations";
 import { ConfirmAction } from "@/components/ui/confirm-action";
-import {
-  canRecordReservationPayment,
-  needsReservationPricing,
-} from "@/lib/reservations/payment-eligibility";
+import { needsReservationPricing } from "@/lib/reservations/payment-eligibility";
 import { buildBulkPaymentHref } from "@/lib/reservations/payment-selection";
 import type { ReservationStatus } from "@/types/database";
 
@@ -27,8 +24,8 @@ type GroupReservation = {
 const linkClass = "font-semibold hover:underline";
 
 /**
- * Row actions for one customer: only the everyday one-click actions. Pay
- * covers every payable reservation in the row. Everything else (releasing,
+ * Row actions for one customer: only the everyday one-click actions.
+ * Payments are recorded from the Edit window. Everything else (releasing,
  * printing, cancel/archive...) is in the customer's invoice panel, opened by
  * "Open" or by clicking the customer name.
  */
@@ -48,11 +45,6 @@ export function GroupActions({
   customerName: string;
 }) {
   const active = reservations.filter((r) => !r.archived_at);
-  const payable = isDeliveredView
-    ? []
-    : reservations.filter((reservation) =>
-        canRecordReservationPayment(reservation),
-      );
   const settleable = isDeliveredView
     ? active.filter((r) => r.status === "reserved" && Number(r.balance) > 0)
     : [];
@@ -61,19 +53,8 @@ export function GroupActions({
       ? active.filter((r) => r.status === "reserved")
       : [];
 
+  // No separate Pay link: payments are recorded from the Edit window.
   const inline: ReactNode[] = [];
-  if (canWrite && payable.length) {
-    inline.push(
-      <Link
-        className={linkClass + " text-emerald-700"}
-        href={buildBulkPaymentHref(payable.map((r) => r.id))}
-        key="pay"
-        title={"Record a payment for " + customerName}
-      >
-        Pay
-      </Link>,
-    );
-  }
   if (canWrite && settleable.length) {
     inline.push(
       <Link

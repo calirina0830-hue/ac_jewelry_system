@@ -37,6 +37,17 @@ export const LIVE_IMPORT_HEADERS = [
   "Downpayment",
 ] as const;
 
+// Seller-facing download template. ITEM holds the item code and the item name
+// together (e.g. "R001 Gold Ring"); the code is resolved against Stock during
+// preview. DATE is accepted for the seller's own records and is not imported.
+export const LIVE_TEMPLATE_HEADERS = [
+  "FB Name",
+  "ITEM",
+  "PRICE",
+  "QUANTITY",
+  "DATE",
+] as const;
+
 const REMOVED_HEADERS = new Set([
   "customer name",
   "fb / cs name",
@@ -136,6 +147,9 @@ const HEADER_KEYS: Record<string, keyof Omit<LiveImportRow, "rowNumber">> = {
   "fb name": "facebookName",
   "item code": "itemCode",
   "item name": "itemName",
+  // Combined "code + name" column from the download template. Parsed into
+  // itemName; the code is extracted during preview (see resolveCombinedItem).
+  item: "itemName",
   quantity: "quantity",
   price: "price",
   downpayment: "downpayment",
@@ -178,7 +192,51 @@ function matchStockByCode(
   return stockByDigits.get(stripLeadingZeros(exactKey)) ?? [];
 }
 
-const AMOUNT_PATTERN = /^\d{1,10}(?:\.\d{1,2})?$/;
+const ITEM_SEPARATOR_PATTERN = /^[\s\-–—_/|:#.,()[\]]+|[\s\-–—_/|:#.,()[\]]+$/g;
+
+function cleanItemToken(value: string): string {
+  return value.replace(ITEM_SEPARATOR_PATTERN, "");
+}
+
+// The template's ITEM column carries the code and name together, in any
+// order ("R001 Gold Ring", "Gold Ring - R001", "#1879 Pearl Necklace").
+// Prefer a token that matches an existing Stock code; otherwise treat the
+// first token containing a digit as the code of a new product. The remaining
+// text becomes the item name.
+export function resolveCombinedItem(
+  text: string,
+  stockByCode: Map<string, ImportStockCandidate[]>,
+  stockByDigits: Map<string, ImportStockCandidate[]>,
+): { itemCode: string; itemName: string } {
+  const full = normalizeWhitespace(text);
+  if (!full) return { itemCode: "", itemName: "" };
+  const tokens = full.split(" ").map(cleanItemToken).filter(Boolean);
+  const withoutToken = (token: string) => {
+    const rest = cleanItemToken(
+      normalizeWhitespace(
+        full
+          .split(" ")
+          .filter((part) => cleanItemToken(part) !== token)
+          .join(" "),
+      ),
+    );
+    return rest.length >= 2 ? rest : full;
+  };
+
+  if (matchStockByCode(full, stockByCode, stockByDigits).length) {
+    return { itemCode: full, itemName: full };
+  }
+  const matched = tokens.find(
+    (token) => matchStockByCode(token, stockByCode, stockByDigits).length > 0,
+  );
+  if (matched) return { itemCode: matched, itemName: withoutToken(matched) };
+
+  const codeLike = tokens.find((token) => /\d/.test(token));
+  if (codeLike) return { itemCode: codeLike, itemName: withoutToken(codeLike) };
+  return { itemCode: "", itemName: full };
+}
+
+const AMOUNT_PATTERN =/^\d{1,10}(?:\.\d{1,2})?$/;
 // Real-world Facebook Live Selling sheets write money as "2,100",
 // "2,100.00", or "₱2,100". Commas are accepted ONLY as strict three-digit
 // thousand groups so the digits and the decimal point are never mangled:
@@ -303,12 +361,13 @@ function rowsFromMatrix(matrix: string[][]): LiveImportRow[] {
     }
   });
 
+  const hasCombinedItem = normalizedHeaders.includes("item");
   if (
     !recognized.has("facebookName") ||
-    !recognized.has("itemCode")
+    (!recognized.has("itemCode") && !hasCombinedItem)
   ) {
     throw new Error(
-      'Missing required headers. Include "FB Name" and "Item Code".',
+      'Missing required headers. Include "FB Name" and "ITEM" (or "Item Code").',
     );
   }
 
@@ -446,11 +505,16 @@ export function buildLiveOrderPreview({
   };
 
   const resolvedParts = parsed.rows.map<ResolvedPart>((row) => {
+    // Template rows carry only the combined ITEM text (no separate code).
+    const combined =
+      normalizeWhitespace(row.itemCode) === "" && normalizeWhitespace(row.itemName) !== ""
+        ? resolveCombinedItem(row.itemName, stockByCode, stockByDigits)
+        : null;
     const normalizedRow: LiveImportRow = {
       ...row,
       facebookName: row.facebookName.trim(),
-      itemCode: normalizeWhitespace(row.itemCode),
-      itemName: normalizeWhitespace(row.itemName),
+      itemCode: combined ? combined.itemCode : normalizeWhitespace(row.itemCode),
+      itemName: combined ? combined.itemName : normalizeWhitespace(row.itemName),
       quantity: normalizeWhitespace(row.quantity),
       price: normalizeWhitespace(row.price),
       downpayment: normalizeWhitespace(row.downpayment),

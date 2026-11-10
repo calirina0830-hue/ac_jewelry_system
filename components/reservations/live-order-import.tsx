@@ -214,7 +214,12 @@ export function LiveOrderImport() {
               <div className="min-w-0 flex-1">
                 <h2 className="font-serif text-2xl text-ink">Validation summary</h2>
                 <p className="mt-1 break-all text-xs text-muted">{preview.fileName}</p>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="mt-5 grid gap-3 rounded-2xl border border-gold bg-gold-soft/30 p-4 sm:grid-cols-3">
+                  <Total label="Total Miners" value={preview.summary.reservationsToCreate} />
+                  <Total label="Total Item" value={preview.summary.itemsToCreate} />
+                  <Total label="New Customer" value={preview.summary.newCustomers} />
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Summary label="Rows uploaded" value={preview.summary.rowsUploaded} />
                   <Summary label="Valid rows" value={preview.summary.validRows} good />
                   <Summary label="Invalid rows" value={preview.summary.invalidRows} alert={preview.summary.invalidRows > 0} />
@@ -316,6 +321,15 @@ function Step({ number, title, active }: { number: string; title: string; active
     <div className="shrink-0 text-center">
       <span className={"grid size-10 place-items-center rounded-full text-sm font-black " + (active ? "bg-ink text-white" : "bg-stone-100 text-muted")}>{number}</span>
       <span className="mt-1 block text-[10px] font-bold uppercase tracking-wider text-muted">{title}</span>
+    </div>
+  );
+}
+
+function Total({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="text-center sm:text-left">
+      <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted">{label}</p>
+      <p className="mt-1 font-serif text-4xl font-black text-ink">{value.toLocaleString("en-PH")}</p>
     </div>
   );
 }

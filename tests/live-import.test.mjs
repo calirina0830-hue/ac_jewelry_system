@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 
 import {
   LIVE_IMPORT_HEADERS,
+  LIVE_TEMPLATE_HEADERS,
   buildLiveOrderPreview,
   normalizeLiveIdentity,
   parseCsv,
@@ -93,6 +94,36 @@ test("valid six-column XLSX parses the first worksheet without a Date column", a
   assert.equal(result.rows[0].quantity, "2");
   assert.equal(result.rows[0].price, "1500.00");
   assert.equal(result.rows[0].downpayment, "500");
+});
+
+test("download template format (FB Name, ITEM, PRICE, QUANTITY, DATE) imports with code+name in ITEM", async () => {
+  assert.deepEqual([...LIVE_TEMPLATE_HEADERS], ["FB Name", "ITEM", "PRICE", "QUANTITY", "DATE"]);
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Live Orders");
+  sheet.addRow([...LIVE_TEMPLATE_HEADERS]);
+  sheet.addRow(["RinaS", "R001 Gold Ring", 1500, 2, new Date("2026-11-11")]);
+  sheet.addRow(["CALI", "Pearl Necklace - n002", "2,000", 1, null]);
+  sheet.addRow(["CALI", "NP-77 Silver Anklet", 900, 1, null]);
+  sheet.addRow([]);
+  const parsed = await parseLiveOrderBuffer(
+    Buffer.from(await workbook.xlsx.writeBuffer()),
+    "orders.xlsx",
+  );
+  assert.equal(parsed.rows.length, 3);
+  const result = buildLiveOrderPreview({ parsed, customers, stockItems: stock });
+  const [ring, necklace, anklet] = result.rows;
+  assert.equal(ring.itemCode, "R001");
+  assert.equal(ring.itemName, "Gold Ring");
+  assert.equal(ring.result, "Ready");
+  assert.equal(ring.mergedQuantity, 2);
+  assert.equal(ring.unitPrice, 1500);
+  assert.equal(necklace.itemCode.toUpperCase(), "N002");
+  assert.equal(necklace.itemName, "Pearl Necklace");
+  assert.equal(necklace.result, "Ready");
+  assert.equal(anklet.itemMatch, "New Product");
+  assert.equal(anklet.itemCode, "NP-77");
+  assert.equal(anklet.itemName, "Silver Anklet");
+  assert.equal(toConfirmationRows(result)[0].itemCode, "R001");
 });
 
 test("missing required headers and legacy templates are rejected clearly", async () => {
