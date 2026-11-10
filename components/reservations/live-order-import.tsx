@@ -237,7 +237,7 @@ export function LiveOrderImport() {
               <table className="w-full min-w-[760px] border-collapse text-left">
                 <thead className="bg-canvas text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
-                    {["Row", "FB Name", "Item Code", "Item Name", "Quantity", "Price", "Downpayment", "Result"].map((label) => (
+                    {["Row", "FB Name", "Item Name", "Quantity", "Price", "Downpayment", "Result"].map((label) => (
                       <th className="px-4 py-4 font-bold" key={label}>{label}</th>
                     ))}
                   </tr>
@@ -247,7 +247,6 @@ export function LiveOrderImport() {
                     <tr className={row.valid ? "" : "bg-red-50/30"} key={row.rowNumber}>
                       <td className="px-4 py-4 text-sm text-muted">{row.rowNumber}</td>
                       <td className="px-4 py-4 text-sm font-semibold text-ink">{row.facebookName || "—"}</td>
-                      <td className="px-4 py-4 font-mono text-xs text-ink">{row.itemCode || "—"}</td>
                       <td className="px-4 py-4 text-sm text-ink">{row.itemName || row.catalogItemName || "—"}</td>
                       <td className="px-4 py-4 text-sm tabular-nums text-ink">
                         {row.mergedQuantity || 1}

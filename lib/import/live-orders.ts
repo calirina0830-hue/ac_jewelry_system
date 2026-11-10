@@ -37,9 +37,8 @@ export const LIVE_IMPORT_HEADERS = [
   "Downpayment",
 ] as const;
 
-// Seller-facing download template. ITEM holds the item code and the item name
-// together (e.g. "R001 Gold Ring"); the code is resolved against Stock during
-// preview. DATE is accepted for the seller's own records and is not imported.
+// Seller-facing download template. ITEM is saved as-is as the item name
+// (see resolveCombinedItem). DATE is accepted for the seller's own records and is not imported.
 export const LIVE_TEMPLATE_HEADERS = [
   "FB Name",
   "ITEM",
@@ -147,8 +146,8 @@ const HEADER_KEYS: Record<string, keyof Omit<LiveImportRow, "rowNumber">> = {
   "fb name": "facebookName",
   "item code": "itemCode",
   "item name": "itemName",
-  // Combined "code + name" column from the download template. Parsed into
-  // itemName; the code is extracted during preview (see resolveCombinedItem).
+  // ITEM column from the download template; saved as-is as the item name
+  // during preview (see resolveCombinedItem).
   item: "itemName",
   quantity: "quantity",
   price: "price",
@@ -192,51 +191,18 @@ function matchStockByCode(
   return stockByDigits.get(stripLeadingZeros(exactKey)) ?? [];
 }
 
-const ITEM_SEPARATOR_PATTERN = /^[\s\-–—_/|:#.,()[\]]+|[\s\-–—_/|:#.,()[\]]+$/g;
+const MAX_ITEM_KEY_LENGTH = 64;
 
-function cleanItemToken(value: string): string {
-  return value.replace(ITEM_SEPARATOR_PATTERN, "");
-}
-
-// The template's ITEM column carries the code and name together, in any
-// order ("R001 Gold Ring", "Gold Ring - R001", "#1879 Pearl Necklace").
-// Prefer a token that matches an existing Stock code; otherwise treat the
-// first token containing a digit as the code of a new product. The remaining
-// text becomes the item name.
-export function resolveCombinedItem(
-  text: string,
-  stockByCode: Map<string, ImportStockCandidate[]>,
-  stockByDigits: Map<string, ImportStockCandidate[]>,
-): { itemCode: string; itemName: string } {
+// The template's ITEM column is saved exactly as written as the item name.
+// No code is split out of it: the whole text is also the item's Stock key, so
+// the same ITEM text always lands on the same Stock record (created on first
+// import with that text as its name).
+export function resolveCombinedItem(text: string): { itemCode: string; itemName: string } {
   const full = normalizeWhitespace(text);
-  if (!full) return { itemCode: "", itemName: "" };
-  const tokens = full.split(" ").map(cleanItemToken).filter(Boolean);
-  const withoutToken = (token: string) => {
-    const rest = cleanItemToken(
-      normalizeWhitespace(
-        full
-          .split(" ")
-          .filter((part) => cleanItemToken(part) !== token)
-          .join(" "),
-      ),
-    );
-    return rest.length >= 2 ? rest : full;
-  };
-
-  if (matchStockByCode(full, stockByCode, stockByDigits).length) {
-    return { itemCode: full, itemName: full };
-  }
-  const matched = tokens.find(
-    (token) => matchStockByCode(token, stockByCode, stockByDigits).length > 0,
-  );
-  if (matched) return { itemCode: matched, itemName: withoutToken(matched) };
-
-  const codeLike = tokens.find((token) => /\d/.test(token));
-  if (codeLike) return { itemCode: codeLike, itemName: withoutToken(codeLike) };
-  return { itemCode: "", itemName: full };
+  return { itemCode: full.slice(0, MAX_ITEM_KEY_LENGTH).trim(), itemName: full };
 }
 
-const AMOUNT_PATTERN =/^\d{1,10}(?:\.\d{1,2})?$/;
+const AMOUNT_PATTERN = /^\d{1,10}(?:\.\d{1,2})?$/;
 // Real-world Facebook Live Selling sheets write money as "2,100",
 // "2,100.00", or "₱2,100". Commas are accepted ONLY as strict three-digit
 // thousand groups so the digits and the decimal point are never mangled:
@@ -508,7 +474,7 @@ export function buildLiveOrderPreview({
     // Template rows carry only the combined ITEM text (no separate code).
     const combined =
       normalizeWhitespace(row.itemCode) === "" && normalizeWhitespace(row.itemName) !== ""
-        ? resolveCombinedItem(row.itemName, stockByCode, stockByDigits)
+        ? resolveCombinedItem(row.itemName)
         : null;
     const normalizedRow: LiveImportRow = {
       ...row,
