@@ -1,6 +1,7 @@
 // Items typed by hand are stored with a generated code. The code exists only
 // because the database links every order line to an entry, so it is never
-// shown: those items display as exactly what was typed.
+// shown: every item displays as exactly what was entered, without its code
+// or category.
 export const MANUAL_ITEM_SKU_PREFIX = "ITEM-";
 export const MANUAL_ITEM_CATEGORY = "Item";
 
@@ -9,8 +10,5 @@ export function formatItemLabel(item: {
   name: string | null | undefined;
   category: string | null | undefined;
 }): string {
-  if (item.sku?.startsWith(MANUAL_ITEM_SKU_PREFIX)) {
-    return item.name ?? "";
-  }
-  return [item.sku, item.name, item.category].filter(Boolean).join(" - ");
+  return item.name?.trim() || item.sku || "";
 }

@@ -48,14 +48,14 @@ test("reservation form takes each item as typed text", async () => {
   assert.equal(form.includes("InlineStockModal"), false);
 });
 
-test("typed items display as entered; older items keep code and category", () => {
+test("items display only as entered, without code or category", () => {
   assert.equal(
     formatItemLabel({ sku: "ITEM-abc123", name: "Rosegold ring", category: "Item" }),
     "Rosegold ring",
   );
   assert.equal(
-    formatItemLabel({ sku: "MSN", name: "MOISSANITE", category: "Necklace" }),
-    "MSN - MOISSANITE - Necklace",
+    formatItemLabel({ sku: "SGT- BRACELET", name: "SGT- BRACELET", category: "Bracelet" }),
+    "SGT- BRACELET",
   );
 });
 
