@@ -11,6 +11,7 @@ import {
   readPrivateSearchTerm,
 } from "@/lib/private-search";
 import { toSearchPattern } from "@/lib/query";
+import { filterEndExclusiveIso, filterStartIso } from "@/lib/reservations/date-filter";
 import { getInvoiceStatusLabel } from "@/lib/reservations/invoice";
 import { createClient } from "@/lib/supabase/server";
 import { reservationQuerySchema } from "@/lib/validation/reservations";
@@ -175,14 +176,8 @@ export async function GET(request: NextRequest) {
         : filters.status === "cancelled"
           ? "cancelled_at"
           : "reserved_at";
-  const fromDateIso = filters.fromDate
-    ? new Date(filters.fromDate + "T00:00:00+08:00").toISOString()
-    : undefined;
-  const toDateIso = filters.toDate
-    ? new Date(
-        new Date(filters.toDate + "T00:00:00+08:00").getTime() + 86_400_000,
-      ).toISOString()
-    : undefined;
+  const fromDateIso = filters.fromDate ? filterStartIso(filters.fromDate) : undefined;
+  const toDateIso = filters.toDate ? filterEndExclusiveIso(filters.toDate) : undefined;
   const datedRows = fromDateIso || toDateIso
     ? rows.filter((row) => {
         const dates = datesById.get(row.id);

@@ -38,6 +38,7 @@ import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { loadCustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { toSearchParams, toSearchPattern } from "@/lib/query";
+import { filterEndExclusiveIso, filterStartIso } from "@/lib/reservations/date-filter";
 import {
   PRIVATE_SEARCH_COOKIE_NAMES,
   readPrivateSearchTerm,
@@ -59,6 +60,12 @@ const STATUS_TABS = [
   { value: "paid", label: "Paid" },
   { value: "delivered", label: "Delivered" },
   { value: "cancelled", label: "Cancelled" },
+] as const;
+
+const PAYMENT_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "no-downpayment", label: "No downpayment" },
+  { value: "partially-paid", label: "Partially paid" },
 ] as const;
 
 function getEmptyStateConfig(status: string, archive: string, canWrite: boolean, search: string) {
@@ -193,6 +200,7 @@ export default async function ReservationsPage({
           toDate: filters.toDate,
           status: filters.status,
           archive: filters.archive,
+          payment: filters.payment !== "all" ? filters.payment : undefined,
           sort: rawParams.sort ? filters.sort : undefined,
           direction: rawParams.sort ? filters.direction : undefined,
           page: filters.page,
@@ -208,7 +216,8 @@ export default async function ReservationsPage({
   // Start independent classification and item-search reads together so the
   // main reservation query does not wait for them one after another.
   const classificationPromise =
-    filters.status === "partially-paid"
+    filters.status === "partially-paid" ||
+    (filters.status === "reserved" && filters.payment === "partially-paid")
       ? supabase.rpc("get_partially_paid_reservation_ids")
       : Promise.resolve({ data: null, error: null });
   const itemMatchPromise = search
@@ -264,6 +273,23 @@ export default async function ReservationsPage({
     query = query.eq("status", filters.status);
   }
 
+  // Payment filter on the Reserved tab. "No downpayment" is an order with
+  // nothing paid yet; "partially paid" uses the same rule as the partially-paid
+  // view above.
+  if (filters.status === "reserved" && filters.payment === "no-downpayment") {
+    query = query.eq("downpayment", 0).gt("balance", 0);
+  } else if (filters.status === "reserved" && filters.payment === "partially-paid") {
+    query = query
+      .eq("status", "reserved")
+      .gt("balance", 0)
+      .in(
+        "id",
+        classificationError || classificationIdList.length === 0
+          ? ["00000000-0000-0000-0000-000000000000"]
+          : classificationIdList,
+      );
+  }
+
   if (filters.archive === "active") {
     query = query.is("archived_at", null);
   } else if (filters.archive === "archived") {
@@ -284,18 +310,10 @@ export default async function ReservationsPage({
           : "reserved_at";
   const sortColumn = rawParams.sort ? filters.sort : operationalDateColumn;
   if (filters.fromDate) {
-    query = query.gte(
-      operationalDateColumn,
-      new Date(filters.fromDate + "T00:00:00+08:00").toISOString(),
-    );
+    query = query.gte(operationalDateColumn, filterStartIso(filters.fromDate));
   }
   if (filters.toDate) {
-    query = query.lt(
-      operationalDateColumn,
-      new Date(
-        new Date(filters.toDate + "T00:00:00+08:00").getTime() + 86_400_000,
-      ).toISOString(),
-    );
+    query = query.lt(operationalDateColumn, filterEndExclusiveIso(filters.toDate));
   }
 
   if (search) {
@@ -493,6 +511,7 @@ export default async function ReservationsPage({
     toDate: filters.toDate || undefined,
     status: filters.status,
     archive: filters.archive,
+    payment: filters.payment !== "all" ? filters.payment : undefined,
     pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
     sort: sortColumn,
     direction: filters.direction,
@@ -756,6 +775,7 @@ export default async function ReservationsPage({
 
       {customerInvoice && !editOpen && (
         <CustomerInvoicePreview
+          dateRange={{ from: filters.fromDate, to: filters.toDate }}
           editBaseHref={editCloseHref}
           closeHref={
             "/reservations?" +
@@ -822,6 +842,47 @@ export default async function ReservationsPage({
         })}
       </nav>
 
+      {filters.status === "reserved" && (
+        <nav
+          aria-label="Payment filter"
+          className="mt-3 flex flex-wrap items-center gap-2"
+        >
+          <span className="mr-1 text-[11px] font-bold uppercase tracking-[0.1em] text-muted">
+            Payment
+          </span>
+          {PAYMENT_FILTERS.map((option) => {
+            const params = toSearchParams({
+              liveBatch: filters.liveBatch || undefined,
+              fromDate: filters.fromDate || undefined,
+              toDate: filters.toDate || undefined,
+              status: "reserved",
+              archive: filters.archive,
+              payment: option.value !== "all" ? option.value : undefined,
+              pageSize: filters.pageSize !== "10" ? filters.pageSize : undefined,
+              sort: rawParams.sort ? filters.sort : undefined,
+              direction: rawParams.sort ? filters.direction : undefined,
+            });
+            const active = filters.payment === option.value;
+
+            return (
+              <Link
+                aria-current={active ? "page" : undefined}
+                className={
+                  "rounded-lg border px-3 py-1.5 text-xs font-bold transition " +
+                  (active
+                    ? "border-gold bg-gold-soft text-gold-dark"
+                    : "border-border bg-white text-muted hover:border-gold hover:text-ink")
+                }
+                href={"/reservations?" + params.toString()}
+                key={option.value}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
+
       {/* Supported query inputs: name="fromDate" name="toDate" */}
       <ReservationFilters
         key={search}
@@ -832,6 +893,7 @@ export default async function ReservationsPage({
           toDate: filters.toDate,
           status: filters.status,
           archive: filters.archive,
+          payment: filters.payment,
           pageSize: filters.pageSize,
           sort: rawParams.sort ? filters.sort : undefined,
           direction: filters.direction,
@@ -1142,15 +1204,6 @@ export default async function ReservationsPage({
                           </BulkReviewButton>
                         )}
                       </>
-                    )}
-                    {isAdmin && filters.archive === "active" && (
-                      <BulkSubmitButton
-                        confirmation="Delete {count} selected reservation(s)? They will move to Archived, where you can restore them or delete them permanently."
-                        operation="archive"
-                        tone="danger"
-                      >
-                        Delete Selected
-                      </BulkSubmitButton>
                     )}
                     {isAdmin && filters.archive === "archived" && (
                       <BulkSubmitButton

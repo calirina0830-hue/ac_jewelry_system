@@ -12,6 +12,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { PAGE_SIZE } from "@/lib/constants/pagination";
 import { formatCurrency, formatManilaDateTime } from "@/lib/format";
 import { toSearchParams } from "@/lib/query";
+import { filterEndExclusiveIso, filterStartIso } from "@/lib/reservations/date-filter";
 import {
   PRIVATE_SEARCH_COOKIE_NAMES,
   readPrivateSearchTerm,
@@ -61,7 +62,12 @@ export default async function ShipmentsPage({
   if (rawParams.q !== undefined) {
     redirect(
       "/shipments?" +
-        toSearchParams({ status: filters.status, page: filters.page }).toString(),
+        toSearchParams({
+          status: filters.status,
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+          page: filters.page,
+        }).toString(),
     );
   }
   const from = (filters.page - 1) * PAGE_SIZE;
@@ -76,6 +82,14 @@ export default async function ShipmentsPage({
 
   if (filters.status !== "all") {
     query = query.eq("status", filters.status);
+  }
+
+  // Released date range, Manila time, both days inclusive.
+  if (filters.fromDate) {
+    query = query.gte("shipped_at", filterStartIso(filters.fromDate));
+  }
+  if (filters.toDate) {
+    query = query.lt("shipped_at", filterEndExclusiveIso(filters.toDate));
   }
 
   if (search) {
@@ -161,6 +175,8 @@ export default async function ShipmentsPage({
   const pageCount = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const queryValues = {
     status: filters.status,
+    fromDate: filters.fromDate || undefined,
+    toDate: filters.toDate || undefined,
   };
 
   return (
@@ -195,6 +211,8 @@ export default async function ShipmentsPage({
         {STATUS_TABS.map((tab) => {
           const params = toSearchParams({
             status: tab.value,
+            fromDate: filters.fromDate || undefined,
+            toDate: filters.toDate || undefined,
           });
           const active = filters.status === tab.value;
           return (
@@ -248,9 +266,35 @@ export default async function ShipmentsPage({
             ))}
           </select>
         </label>
-        <button className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white transition hover:bg-ink/90" type="submit">
-          Apply
-        </button>
+        <div className="grid gap-3 sm:col-span-3 sm:grid-cols-[auto_auto_auto] sm:items-end">
+          <label className="block" htmlFor="shipment-from-date">
+            <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
+              Released from
+            </span>
+            <input
+              className="h-11 w-full rounded-xl border border-border px-3 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
+              defaultValue={filters.fromDate}
+              id="shipment-from-date"
+              name="fromDate"
+              type="date"
+            />
+          </label>
+          <label className="block" htmlFor="shipment-to-date">
+            <span className="mb-1.5 block text-xs font-bold uppercase leading-4 tracking-[0.1em] text-muted">
+              To
+            </span>
+            <input
+              className="h-11 w-full rounded-xl border border-border px-3 text-sm outline-none focus:border-gold focus:ring-4 focus:ring-gold/10"
+              defaultValue={filters.toDate}
+              id="shipment-to-date"
+              name="toDate"
+              type="date"
+            />
+          </label>
+          <button className="h-11 rounded-xl bg-ink px-5 text-sm font-bold text-white transition hover:bg-ink/90" type="submit">
+            Apply
+          </button>
+        </div>
       </form>
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-border bg-white shadow-card">

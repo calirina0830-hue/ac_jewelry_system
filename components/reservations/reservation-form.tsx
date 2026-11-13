@@ -14,7 +14,7 @@ import {
   InputField,
   TextareaField,
 } from "@/components/ui/form-elements";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatOrderDateTime } from "@/lib/format";
 import {
   calculateReservationTotals,
   parseMoneyToCents,
@@ -396,6 +396,11 @@ export function ReservationForm({
                       type="text"
                       value={item.itemLabel}
                     />
+                    {item.orderedAt && (
+                      <span className="mt-1 block text-[11px] font-normal text-muted">
+                        Ordered: {formatOrderDateTime(item.orderedAt)}
+                      </span>
+                    )}
                     {itemNameError?.map((error) => (
                       <span className="mt-1.5 block text-xs text-red-700" key={error}>
                         {error}

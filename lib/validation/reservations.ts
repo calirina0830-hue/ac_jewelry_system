@@ -173,9 +173,10 @@ export const reservationInvoiceNotesSchema = z.object({
 const reservationDateFilterSchema = z
   .string()
   .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  // "YYYY-MM-DD" for a whole day, or "YYYY-MM-DDTHH:mm" for an exact time.
+  .regex(/^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$/)
   .refine((value) => {
-    const [year, month, day] = value.split("-").map(Number);
+    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
     const date = new Date(Date.UTC(year, month - 1, day));
     return (
       date.getUTCFullYear() === year &&
@@ -194,6 +195,8 @@ export const reservationQuerySchema = z.object({
     .enum(["all", ...RESERVATION_STATUSES, "partially-paid"])
     .catch("reserved"),
   archive: z.enum(["active", "archived", "all"]).catch("active"),
+  // Reserved tab only: which orders have no downpayment or a partial payment.
+  payment: z.enum(["all", "no-downpayment", "partially-paid"]).catch("all"),
   sort: z
     .enum([
       "reservation_no",

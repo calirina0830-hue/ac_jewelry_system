@@ -19,7 +19,15 @@ import {
   selectCustomerInvoiceItems,
 } from "@/lib/reservations/customer-invoice-selection";
 import { buildBulkPaymentHref } from "@/lib/reservations/payment-selection";
+import {
+  ReleaseReceiptModal,
+  type ReleaseReceipt,
+} from "@/components/reservations/release-receipt-modal";
 import { canRoleTransitionReservation } from "@/lib/reservations/status";
+import {
+  filterEndExclusiveIso,
+  filterStartIso,
+} from "@/lib/reservations/date-filter";
 import type { ProfileRole } from "@/types/database";
 
 type ActionMessage = { status: "success" | "error"; message: string };
@@ -93,6 +101,7 @@ export function CustomerInvoicePreview({
   orderActions,
   role,
   editBaseHref,
+  dateRange,
 }: {
   invoice: CustomerInvoice;
   closeHref: string;
@@ -104,11 +113,27 @@ export function CustomerInvoicePreview({
   role: ProfileRole | undefined;
   // This view's URL; the edit window opens on top of it.
   editBaseHref: string;
+  // The From/To filter of the list. Only items ordered inside it are shown.
+  dateRange?: { from: string; to: string };
 }) {
   const router = useRouter();
   const invoiceRef = useRef<HTMLElement>(null);
   const [invoiceScale, setInvoiceScale] = useState(1);
-  const [excludedIds, setExcludedIds] = useState<string[]>([]);
+  const [manualExcludedIds, setExcludedIds] = useState<string[]>([]);
+  // Items outside the date filter are hidden the same way unticked items are.
+  const outOfRangeIds = (() => {
+    if (!dateRange?.from && !dateRange?.to) return [];
+    const fromTime = dateRange.from ? Date.parse(filterStartIso(dateRange.from)) : null;
+    const toTime = dateRange.to ? Date.parse(filterEndExclusiveIso(dateRange.to)) : null;
+    return invoice.items
+      .filter((item) => {
+        const time = item.orderedAt ? Date.parse(item.orderedAt) : NaN;
+        if (Number.isNaN(time)) return true;
+        return (fromTime !== null && time < fromTime) || (toTime !== null && time >= toTime);
+      })
+      .map((item) => item.id);
+  })();
+  const excludedIds = [...new Set([...manualExcludedIds, ...outOfRangeIds])];
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ActionMessage | null>(null);
@@ -116,6 +141,7 @@ export function CustomerInvoicePreview({
   const [releaseDownpayment, setReleaseDownpayment] = useState("");
   const [releaseQuantities, setReleaseQuantities] = useState<Record<string, string>>({});
   const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [releaseReceipt, setReleaseReceipt] = useState<ReleaseReceipt | null>(null);
 
   const includedIds = invoice.items
     .filter((item) => !excludedIds.includes(item.id))
@@ -159,6 +185,21 @@ export function CustomerInvoicePreview({
     0,
   );
   const enteredDownpayment = Number(releaseDownpayment.trim() || "0");
+  // "From" choice: the earliest order date among the items on this invoice.
+  const earliestOrderDate = (() => {
+    const times = invoice.items
+      .map((item) => (item.orderedAt ? new Date(item.orderedAt).getTime() : NaN))
+      .filter((time) => !Number.isNaN(time));
+    if (!times.length) return null;
+    const date = new Date(Math.min(...times));
+    return (
+      date.getFullYear() +
+      "-" +
+      String(date.getMonth() + 1).padStart(2, "0") +
+      "-" +
+      String(date.getDate()).padStart(2, "0")
+    );
+  })();
   const releasePreview = computeReleasePreview({
     remainingTotal: invoice.totals.total,
     unappliedDownpayment: invoice.unappliedDownpayment,
@@ -292,6 +333,17 @@ export function CustomerInvoicePreview({
       releaseGroups.map((group) => group.value),
       totalApplied,
     );
+    // What is being released, captured before the invoice refreshes.
+    const releasedLines = releasableItems.map((item) => {
+      const quantity = releaseQuantityOf(item) ?? item.quantity;
+      return {
+        key: item.id,
+        name: item.itemName,
+        quantity,
+        amount: item.quantity ? (item.lineTotal * quantity) / item.quantity : 0,
+      };
+    });
+    const releasedShipments: Array<{ id: string; no: string | null }> = [];
     for (const [index, group] of releaseGroups.entries()) {
       const result = await createItemRelease(
         group.reservationId,
@@ -305,7 +357,17 @@ export function CustomerInvoicePreview({
       if (result.status !== "success") {
         return finish({ status: "error", message: result.message });
       }
+      if (result.shipmentId) {
+        releasedShipments.push({ id: result.shipmentId, no: result.shipmentNo ?? null });
+      }
     }
+    setReleaseReceipt({
+      customerName: invoice.customerName,
+      releaseDate,
+      lines: releasedLines,
+      appliedDownpayment: totalApplied,
+      shipments: releasedShipments,
+    });
     setExcludedIds([]);
     setReleaseDownpayment("");
     setReleaseQuantities({});
@@ -353,26 +415,24 @@ export function CustomerInvoicePreview({
   ].filter((detail): detail is [string, string] => Boolean(detail[1]));
 
   // Close with Escape.
+  // While the release receipt is open, Escape closes only that receipt.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") router.push(closeHref, { scroll: false });
+      if (event.key === "Escape" && !releaseReceipt) router.push(closeHref, { scroll: false });
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeHref, router]);
+  }, [closeHref, router, releaseReceipt]);
 
   useEffect(() => {
     function fitInvoice() {
       const invoiceElement = invoiceRef.current;
       if (!invoiceElement) return;
 
-      const availableHeight = Math.max(window.innerHeight - 32, 320);
+      // Shrink only to fit the width. A long order scrolls instead of shrinking,
+      // so the item text stays readable.
       const availableWidth = Math.max(window.innerWidth - 32, 320);
-      const scale = Math.min(
-        1,
-        availableHeight / invoiceElement.scrollHeight,
-        availableWidth / invoiceElement.offsetWidth,
-      );
+      const scale = Math.min(1, availableWidth / invoiceElement.offsetWidth);
 
       setInvoiceScale(Number.isFinite(scale) && scale > 0 ? scale : 1);
     }
@@ -396,7 +456,7 @@ export function CustomerInvoicePreview({
     <div
       aria-label={"Invoice for " + invoice.customerName}
       aria-modal="true"
-      className="fixed inset-0 z-50 flex min-h-screen items-center justify-center overflow-hidden bg-ink/40 px-4 py-4 sm:px-6"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink/40 px-4 py-4 sm:px-6"
       data-print-modal
       onClick={(event) => {
         if (event.target === event.currentTarget) close();
@@ -483,16 +543,6 @@ export function CustomerInvoicePreview({
                     >
                       Mark as paid
                     </Link>
-                  )}
-                  {movable.delivered.length > 0 && (
-                    <button
-                      className={secondaryButton}
-                      disabled={busy}
-                      onClick={() => askToConfirm("delivered")}
-                      type="button"
-                    >
-                      Mark delivered
-                    </button>
                   )}
                   {movable.cancelled.length > 0 && (
                     <button
@@ -632,15 +682,38 @@ export function CustomerInvoicePreview({
                     <InvoiceTotal emphasize label="Remaining balance" value={releasePreview.remainingBalance} />
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-sm sm:flex-col sm:items-start sm:gap-1">
+                <div className="flex flex-col gap-1 text-sm sm:items-start">
                   <span className="font-semibold text-ink">Release date</span>
-                  <input
-                    className="h-9 rounded-lg border border-border bg-transparent px-2 outline-none focus:border-gold"
-                    onChange={(event) => setReleaseDate(event.target.value)}
-                    type="date"
-                    value={releaseDate}
-                  />
-                </label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      className="h-7 rounded-lg border border-border bg-white px-2 text-xs font-semibold text-ink hover:border-gold"
+                      onClick={() => setReleaseDate(earliestOrderDate ?? todayInputValue())}
+                      disabled={!earliestOrderDate}
+                      title={
+                        earliestOrderDate
+                          ? "Earliest order date on this invoice"
+                          : "No order dates on this invoice"
+                      }
+                      type="button"
+                    >
+                      From
+                    </button>
+                    <button
+                      className="h-7 rounded-lg border border-border bg-white px-2 text-xs font-semibold text-ink hover:border-gold"
+                      onClick={() => setReleaseDate(todayInputValue())}
+                      title="Today"
+                      type="button"
+                    >
+                      To
+                    </button>
+                    <input
+                      className="h-9 rounded-lg border border-border bg-transparent px-2 outline-none focus:border-gold"
+                      onChange={(event) => setReleaseDate(event.target.value)}
+                      type="date"
+                      value={releaseDate}
+                    />
+                  </div>
+                </div>
                 {releaseError && (
                   <p className="text-sm font-semibold text-red-700 sm:col-span-2" role="alert">
                     {releaseError}
@@ -844,7 +917,7 @@ export function CustomerInvoicePreview({
             )}
             <InvoiceTotal count label="Total quantity" value={displayInvoice.totals.quantity} />
             <InvoiceTotal emphasize label="Total item" value={displayInvoice.totals.total} />
-            <InvoiceTotal label="Remaining downpayment" value={displayInvoice.totals.amountPaid} />
+            <InvoiceTotal label="Downpayment" value={displayInvoice.totals.amountPaid} />
             <div className="mt-3 flex items-center justify-between gap-4 rounded-2xl border-2 border-[#e0b75a] bg-gradient-to-r from-[#5c0c1b] via-[#7a1424] to-[#5c0c1b] px-5 py-4 shadow-md">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#fbe7b5]">
                 {orderStatus.label === "Cancelled" ? "Order cancelled" : "Balance due"}
@@ -880,6 +953,12 @@ export function CustomerInvoicePreview({
           </footer>
         </article>
       </div>
+      {releaseReceipt && (
+        <ReleaseReceiptModal
+          onClose={() => setReleaseReceipt(null)}
+          receipt={releaseReceipt}
+        />
+      )}
     </div>
   );
 }

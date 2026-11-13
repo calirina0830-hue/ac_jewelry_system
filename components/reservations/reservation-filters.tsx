@@ -9,6 +9,13 @@ import {
 } from "@/actions/private-search";
 import { toSearchParams } from "@/lib/query";
 
+// "YYYY-MM-DDTHH:mm" -> { date, time }; a plain date has no time.
+function splitDateTime(value: string): { date: string; time: string } {
+  return value.length > 10
+    ? { date: value.slice(0, 10), time: value.slice(11, 16) }
+    : { date: value, time: "" };
+}
+
 type FilterValues = {
   q?: string;
   liveBatch?: string;
@@ -16,6 +23,7 @@ type FilterValues = {
   toDate?: string;
   status: string;
   archive: string;
+  payment?: string;
   pageSize?: string;
   sort?: string;
   direction?: string;
@@ -56,10 +64,12 @@ export function ReservationFilters({
       const newFrom = overrides.fromDate !== undefined ? overrides.fromDate : (searchParams.get("fromDate") ?? "");
       const newTo = overrides.toDate !== undefined ? overrides.toDate : (searchParams.get("toDate") ?? "");
       const newPageSize = overrides.pageSize !== undefined ? overrides.pageSize : (searchParams.get("pageSize") ?? initialFilters.pageSize);
+      const newPayment = searchParams.get("payment") ?? initialFilters.payment ?? "all";
 
       const params = toSearchParams({
         status: newStatus,
         archive: newArchive,
+        payment: newPayment !== "all" ? newPayment : undefined,
         fromDate: newFrom || undefined,
         toDate: newTo || undefined,
         pageSize: newPageSize !== "10" ? newPageSize : undefined,
@@ -91,6 +101,7 @@ export function ReservationFilters({
           toDate: searchParams.get("toDate") ?? initialFilters.toDate,
           status: searchParams.get("status") ?? initialFilters.status,
           archive: searchParams.get("archive") ?? initialFilters.archive,
+          payment: searchParams.get("payment") ?? initialFilters.payment,
           pageSize:
             searchParams.get("pageSize") ?? initialFilters.pageSize,
           sort: searchParams.get("sort") ?? initialFilters.sort,
@@ -101,12 +112,28 @@ export function ReservationFilters({
     }, 150);
   };
 
+  // A From/To value is "YYYY-MM-DD", or "YYYY-MM-DDTHH:mm" once a time is set.
+  // The date and the optional time are separate inputs; they are joined here.
   const handleFromDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateFilters({ fromDate: e.target.value });
+    const time = splitDateTime(searchParams.get("fromDate") ?? initialFilters.fromDate ?? "").time;
+    updateFilters({ fromDate: e.target.value ? e.target.value + (time ? "T" + time : "") : "" });
+  };
+
+  const handleFromTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { date } = splitDateTime(searchParams.get("fromDate") ?? initialFilters.fromDate ?? "");
+    if (!date) return;
+    updateFilters({ fromDate: date + (e.target.value ? "T" + e.target.value : "") });
   };
 
   const handleToDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateFilters({ toDate: e.target.value });
+    const time = splitDateTime(searchParams.get("toDate") ?? initialFilters.toDate ?? "").time;
+    updateFilters({ toDate: e.target.value ? e.target.value + (time ? "T" + time : "") : "" });
+  };
+
+  const handleToTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { date } = splitDateTime(searchParams.get("toDate") ?? initialFilters.toDate ?? "");
+    if (!date) return;
+    updateFilters({ toDate: date + (e.target.value ? "T" + e.target.value : "") });
   };
 
   const handleArchiveChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -122,10 +149,15 @@ export function ReservationFilters({
   const currentFrom = searchParams.get("fromDate") ?? initialFilters.fromDate ?? "";
   const currentTo = searchParams.get("toDate") ?? initialFilters.toDate ?? "";
   const currentPageSize = searchParams.get("pageSize") ?? initialFilters.pageSize ?? "10";
+  const fromParts = splitDateTime(currentFrom);
+  const toParts = splitDateTime(currentTo);
 
-  // Records and page size are used rarely, so they sit behind "More filters".
-  // Open it automatically when either is set to a non-default value.
-  const hasMoreFilters = currentArchive !== "active" || currentPageSize !== "10";
+  // Records, page size and times are used rarely, so they sit behind "More filters".
+  // Open it automatically when any of them is set to a non-default value.
+  const hasMoreFilters =
+    currentArchive !== "active" ||
+    currentPageSize !== "10" ||
+    Boolean(fromParts.time || toParts.time);
   const [moreOpen, setMoreOpen] = useState(hasMoreFilters);
 
   const inputClass =
@@ -159,6 +191,14 @@ export function ReservationFilters({
         value={searchParams.get("direction") ?? initialFilters.direction ?? ""}
       />
       <input name="status" type="hidden" value={currentStatus} />
+      {/* Carries the full From/To value, date plus optional time, on submit. */}
+      <input name="fromDate" type="hidden" value={currentFrom} />
+      <input name="toDate" type="hidden" value={currentTo} />
+      <input
+        name="payment"
+        type="hidden"
+        value={searchParams.get("payment") ?? initialFilters.payment ?? "all"}
+      />
 
       <div className="grid items-end gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_150px_150px_auto]">
         <label className="block sm:col-span-2 lg:col-span-1" htmlFor="reservation-search">
@@ -185,10 +225,9 @@ export function ReservationFilters({
           <input
             className={inputClass}
             id="reservation-from-date"
-            name="fromDate"
             onChange={handleFromDateChange}
             type="date"
-            value={currentFrom}
+            value={fromParts.date}
           />
         </label>
         <label className="block" htmlFor="reservation-to-date">
@@ -196,10 +235,9 @@ export function ReservationFilters({
           <input
             className={inputClass}
             id="reservation-to-date"
-            name="toDate"
             onChange={handleToDateChange}
             type="date"
-            value={currentTo}
+            value={toParts.date}
           />
         </label>
         <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-1">
@@ -252,6 +290,32 @@ export function ReservationFilters({
             <option value="archived">Archived reservations</option>
             <option value="all">All records</option>
           </select>
+        </label>
+        <label className="block" htmlFor="reservation-from-time">
+          <span className={labelClass}>From time</span>
+          <input
+            className={inputClass}
+            disabled={!fromParts.date}
+            id="reservation-from-time"
+            onChange={handleFromTimeChange}
+            step={60}
+            title={fromParts.date ? "" : "Pick a From date first"}
+            type="time"
+            value={fromParts.time}
+          />
+        </label>
+        <label className="block" htmlFor="reservation-to-time">
+          <span className={labelClass}>To time</span>
+          <input
+            className={inputClass}
+            disabled={!toParts.date}
+            id="reservation-to-time"
+            onChange={handleToTimeChange}
+            step={60}
+            title={toParts.date ? "" : "Pick a To date first"}
+            type="time"
+            value={toParts.time}
+          />
         </label>
         <label className="block" htmlFor="reservation-page-size">
           <span className={labelClass}>Customers per page</span>

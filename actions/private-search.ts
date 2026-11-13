@@ -68,7 +68,13 @@ async function applySearch(
 
   if (scope === "shipments") {
     const parsed = shipmentQuerySchema.parse({ ...filters, q: safeTerm });
-    redirect(withQuery("/shipments", { status: parsed.status }));
+    redirect(
+      withQuery("/shipments", {
+        status: parsed.status,
+        fromDate: parsed.fromDate,
+        toDate: parsed.toDate,
+      }),
+    );
   }
 
   const parsed = reservationQuerySchema.parse({ ...filters, q: safeTerm });
@@ -79,6 +85,7 @@ async function applySearch(
       toDate: parsed.toDate,
       status: parsed.status,
       archive: parsed.archive,
+      payment: parsed.payment !== "all" ? parsed.payment : undefined,
       sort: parsed.sort,
       direction: parsed.direction,
       pageSize: parsed.pageSize !== "10" ? parsed.pageSize : undefined,
@@ -101,6 +108,8 @@ export async function clearCustomerSearch(): Promise<never> {
 export async function submitShipmentSearch(formData: FormData): Promise<never> {
   return applySearch("shipments", field(formData, "q"), {
     status: field(formData, "status"),
+    fromDate: field(formData, "fromDate"),
+    toDate: field(formData, "toDate"),
   });
 }
 
@@ -111,6 +120,7 @@ export async function submitReservationSearch(formData: FormData): Promise<never
     toDate: field(formData, "toDate"),
     status: field(formData, "status"),
     archive: field(formData, "archive"),
+    payment: field(formData, "payment"),
     pageSize: field(formData, "pageSize"),
     sort: field(formData, "sort"),
     direction: field(formData, "direction"),

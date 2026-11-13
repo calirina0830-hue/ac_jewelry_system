@@ -3,18 +3,18 @@ import { formatCurrency, formatManilaDate, formatOrderDateTime } from "@/lib/for
 import type { PdfContent, PdfDocumentDefinition } from "@/lib/reservations/invoice-document";
 import type { CustomerInvoice } from "@/lib/reservations/customer-invoice";
 
-// Palette taken from the AC Pearls and Jewels invoice design: deep maroon
-// bands, gold accents and a cream page.
-const MAROON = "#7a1424";
-const GOLD = "#a8822a";
+// Palette taken from the AC Pearls and Jewels invoice design: pink
+// bands, gold accents and a blush-white page.
+const MAROON = "#c93d6e";
+const GOLD = "#b8862f";
 const GOLD_BRIGHT = "#e9c46a";
-const GOLD_LINE = "#dcc68a";
-const GOLD_SOFT = "#f6e7b8";
-const CREAM = "#fbf5e9";
-const CREAM_TEXT = "#fff7e6";
-const PAPER = "#fffdf8";
-const INK = "#2b1d1d";
-const MUTED = "#7a6a62";
+const GOLD_LINE = "#e8c4d4";
+const GOLD_SOFT = "#fbe3ec";
+const CREAM = "#fdf1f6";
+const CREAM_TEXT = "#fff7fa";
+const PAPER = "#fffafc";
+const INK = "#3a1a28";
+const MUTED = "#8a6674";
 
 // Page size is US Letter (612 x 792 pt). The top band sits on page 1 only.
 const PAGE_WIDTH = 612;
@@ -112,7 +112,7 @@ function tableLayout(itemCount: number) {
     paddingTop: (rowIndex: number) => (rowIndex === 0 ? 7 : 5),
     paddingBottom: (rowIndex: number) => (rowIndex === 0 ? 7 : 5),
     fillColor: (rowIndex: number) =>
-      rowIndex === 0 ? MAROON : rowIndex % 2 === 0 ? "#fbf7ef" : PAPER,
+      rowIndex === 0 ? MAROON : rowIndex % 2 === 0 ? "#fdf4f8" : PAPER,
   };
 }
 
