@@ -155,3 +155,39 @@ export function allocateAppliedDownpayment(
     return share;
   });
 }
+
+// Splits the customer's downpayment across every order in one release, in
+// proportion to each order's released value, so no order is left at zero.
+// Works in centavos so the shares add up exactly to the typed amount.
+export function allocateReleaseDownpayment(
+  releaseValues: number[],
+  applied: number,
+): number[] {
+  const valueCents = releaseValues.map((value) => Math.round(value * 100));
+  const totalValueCents = valueCents.reduce((sum, cents) => sum + cents, 0);
+  const appliedCents = Math.round(applied * 100);
+  if (totalValueCents <= 0 || appliedCents <= 0) {
+    return releaseValues.map(() => 0);
+  }
+
+  const shares = valueCents.map((cents) =>
+    Math.min(cents, Math.floor((appliedCents * cents) / totalValueCents)),
+  );
+  // Rounding leaves a few centavos; give them out one at a time to orders with room.
+  let leftover = appliedCents - shares.reduce((sum, cents) => sum + cents, 0);
+  while (leftover > 0) {
+    let best = -1;
+    let bestRoom = 0;
+    shares.forEach((share, index) => {
+      const room = valueCents[index] - share;
+      if (room > bestRoom) {
+        bestRoom = room;
+        best = index;
+      }
+    });
+    if (best < 0) break;
+    shares[best] += 1;
+    leftover -= 1;
+  }
+  return shares.map((cents) => cents / 100);
+}

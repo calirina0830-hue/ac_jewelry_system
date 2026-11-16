@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   allocateAppliedDownpayment,
+  allocateReleaseDownpayment,
   computeCycleTotals,
   computeReleasePreview,
   selectBillableOrders,
@@ -262,6 +263,22 @@ test("the preview matches the invoice after the same release", () => {
   assert.equal(preview.remainingDownpayment, invoice.availableDownpayment);
   assert.equal(preview.remainingBalance, invoice.remainingBalance);
   assert.equal(preview.cod, invoice.cod);
+});
+
+test("a release shares the downpayment across every selected order", () => {
+  // Orders worth 6,600 and 3,600 with 4,000 of downpayment: both get a share.
+  const shares = allocateReleaseDownpayment([6600, 3600], 4000);
+  assert.deepEqual(shares, [2588.24, 1411.76]);
+  assert.equal(
+    Math.round(shares.reduce((sum, share) => sum + share, 0) * 100),
+    400000,
+  );
+
+  // Centavo rounding still adds up exactly to the typed amount.
+  const odd = allocateReleaseDownpayment([100, 100, 100], 0.02);
+  assert.equal(odd.reduce((sum, share) => sum + share, 0).toFixed(2), "0.02");
+
+  assert.deepEqual(allocateReleaseDownpayment([1000, 2000], 0), [0, 0]);
 });
 
 test("one typed amount fills the selected orders in turn", () => {

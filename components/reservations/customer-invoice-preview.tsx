@@ -11,7 +11,7 @@ import { formatCurrency, formatDate, formatOrderDateTime } from "@/lib/format";
 import type { CustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { formatItemLabel } from "@/lib/reservations/item-label";
 import {
-  allocateAppliedDownpayment,
+  allocateReleaseDownpayment,
   computeReleasePreview,
 } from "@/lib/reservations/customer-cycle";
 import {
@@ -24,10 +24,6 @@ import {
   type ReleaseReceipt,
 } from "@/components/reservations/release-receipt-modal";
 import { canRoleTransitionReservation } from "@/lib/reservations/status";
-import {
-  filterEndExclusiveIso,
-  filterStartIso,
-} from "@/lib/reservations/date-filter";
 import type { ProfileRole } from "@/types/database";
 
 type ActionMessage = { status: "success" | "error"; message: string };
@@ -101,7 +97,6 @@ export function CustomerInvoicePreview({
   orderActions,
   role,
   editBaseHref,
-  dateRange,
 }: {
   invoice: CustomerInvoice;
   closeHref: string;
@@ -113,27 +108,12 @@ export function CustomerInvoicePreview({
   role: ProfileRole | undefined;
   // This view's URL; the edit window opens on top of it.
   editBaseHref: string;
-  // The From/To filter of the list. Only items ordered inside it are shown.
-  dateRange?: { from: string; to: string };
 }) {
   const router = useRouter();
   const invoiceRef = useRef<HTMLElement>(null);
   const [invoiceScale, setInvoiceScale] = useState(1);
   const [manualExcludedIds, setExcludedIds] = useState<string[]>([]);
-  // Items outside the date filter are hidden the same way unticked items are.
-  const outOfRangeIds = (() => {
-    if (!dateRange?.from && !dateRange?.to) return [];
-    const fromTime = dateRange.from ? Date.parse(filterStartIso(dateRange.from)) : null;
-    const toTime = dateRange.to ? Date.parse(filterEndExclusiveIso(dateRange.to)) : null;
-    return invoice.items
-      .filter((item) => {
-        const time = item.orderedAt ? Date.parse(item.orderedAt) : NaN;
-        if (Number.isNaN(time)) return true;
-        return (fromTime !== null && time < fromTime) || (toTime !== null && time >= toTime);
-      })
-      .map((item) => item.id);
-  })();
-  const excludedIds = [...new Set([...manualExcludedIds, ...outOfRangeIds])];
+  const excludedIds = manualExcludedIds;
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<ActionMessage | null>(null);
@@ -326,13 +306,25 @@ export function CustomerInvoicePreview({
       return;
     }
 
-    setBusy(true);
-    setMessage(null);
-    setReleaseError(null);
-    const appliedByGroup = allocateAppliedDownpayment(
+    // Every selected order is released together, so the typed downpayment is
+    // shared across all of them. Each order must get a share above zero; the
+    // server refuses a zero-downpayment release. Checked before anything is
+    // sent, so a failure cannot leave some orders released and others not.
+    const appliedByGroup = allocateReleaseDownpayment(
       releaseGroups.map((group) => group.value),
       totalApplied,
     );
+    const unfundedGroup = releaseGroups.find((_, index) => appliedByGroup[index] <= 0);
+    if (unfundedGroup) {
+      setReleaseError(
+        "Enter a downpayment above ₱0.00 so every selected order can be released together.",
+      );
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+    setReleaseError(null);
     // What is being released, captured before the invoice refreshes.
     const releasedLines = releasableItems.map((item) => {
       const quantity = releaseQuantityOf(item) ?? item.quantity;

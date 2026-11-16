@@ -356,6 +356,8 @@ export default async function ReservationsPage({
   const releasedValueByReservation = new Map<string, number>();
   const remainingValueByReservation = new Map<string, number>();
   const downpaymentAppliedByReservation = new Map<string, number>();
+  // Reservations with at least one confirmed release (shipment with status shipped).
+  const shippedReservationIds = new Set<string>();
   const activePaidByReservation = new Map<string, number>();
   if (reservationIds.length) {
     // These reads are independent, so avoid waiting for one network round trip
@@ -394,6 +396,7 @@ export default async function ReservationsPage({
 
     const shippedResIds = new Set((shipments ?? []).map((s) => s.reservation_id));
     for (const s of shipments ?? []) {
+      shippedReservationIds.add(s.reservation_id);
       downpaymentAppliedByReservation.set(
         s.reservation_id,
         (downpaymentAppliedByReservation.get(s.reservation_id) ?? 0) + Number(s.downpayment_applied ?? 0),
@@ -518,8 +521,11 @@ export default async function ReservationsPage({
   };
   // A release records a delivery date, but the order stays in Reserved until
   // every item is out. Items were already narrowed to unreleased ones here.
+  // An order keeps showing in Reserved while it has unreleased items after a
+  // confirmed release, even though its delivery date is set. Manual "Mark as
+  // Delivered" has no shipment, so it still leaves Reserved.
   const isPartlyReleased = (reservationId: string) =>
-    downpaymentAppliedByReservation.has(reservationId) &&
+    shippedReservationIds.has(reservationId) &&
     (itemsByReservation.get(reservationId)?.length ?? 0) > 0;
   const visibleReservations = (reservations ?? []).filter((reservation) =>
     filters.status === "reserved"
@@ -775,7 +781,6 @@ export default async function ReservationsPage({
 
       {customerInvoice && !editOpen && (
         <CustomerInvoicePreview
-          dateRange={{ from: filters.fromDate, to: filters.toDate }}
           editBaseHref={editCloseHref}
           closeHref={
             "/reservations?" +
