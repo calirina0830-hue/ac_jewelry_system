@@ -454,6 +454,74 @@ export async function updateReservation(
       ".";
     return { status: "error", message, fieldErrors: { additionalDownpayment: [message] } };
   }
+  // When the customer paid the added downpayment. Required with an amount;
+  // typed as Manila time (YYYY-MM-DDTHH:mm from a datetime-local input).
+  const additionalPaidAtInput =
+    getTextField(formData, "additionalDownpaymentPaidAt")?.trim() ?? "";
+  let additionalPaidAt: string | null = null;
+  if (additionalCents > 0) {
+    const match = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(additionalPaidAtInput);
+    const paidAt = match ? new Date(additionalPaidAtInput + ":00+08:00") : null;
+    if (!paidAt || Number.isNaN(paidAt.getTime())) {
+      const message = "Enter the date and time the customer paid.";
+      return {
+        status: "error",
+        message,
+        fieldErrors: { additionalDownpaymentPaidAt: [message] },
+      };
+    }
+    if (paidAt.getTime() > Date.now() + 5 * 60 * 1000) {
+      const message = "The payment date and time cannot be in the future.";
+      return {
+        status: "error",
+        message,
+        fieldErrors: { additionalDownpaymentPaidAt: [message] },
+      };
+    }
+    additionalPaidAt = paidAt.toISOString();
+
+    // Double entry guard: the same customer already has a payment at this
+    // exact date and time (to the minute), so this is most likely the same
+    // downpayment typed twice.
+    const minuteOf = (value: string) => Math.floor(new Date(value).getTime() / 60000);
+    const { data: existingPayments, error: existingPaymentsError } = await supabase
+      .from("reservation_payments")
+      // "*" so this keeps working before the paid_at column is added.
+      .select("*")
+      .in(
+        "reservation_id",
+        allocations.map((order) => order.id),
+      )
+      .is("voided_at", null);
+    if (existingPaymentsError) {
+      const message = "Could not check for a double entry. Please try again.";
+      return { status: "error", message };
+    }
+    const duplicate = (existingPayments ?? []).find((payment) => {
+      const when = payment.paid_at ?? payment.recorded_at;
+      return when ? minuteOf(when) === minuteOf(additionalPaidAt as string) : false;
+    });
+    if (duplicate) {
+      const message =
+        "Double entry payment: a downpayment of " +
+        centsToDecimal(Math.round(Number(duplicate.amount) * 100)) +
+        " was already entered for " +
+        new Intl.DateTimeFormat("en-PH", {
+          timeZone: "Asia/Manila",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(additionalPaidAt)) +
+        ". It was not added again.";
+      return {
+        status: "error",
+        message,
+        fieldErrors: { additionalDownpaymentPaidAt: ["Double entry payment."] },
+      };
+    }
+  }
 
   const { data: reservationId, error } = await supabase.rpc(
     "update_reservation_with_payment_adjustment",
@@ -528,7 +596,7 @@ export async function updateReservation(
         .select("updated_at")
         .eq("id", order.id)
         .maybeSingle();
-      const { error: paymentError } = current
+      const { data: paymentResult, error: paymentError } = current
         ? await supabase.rpc("record_reservation_payment", {
             p_reservation_id: order.id,
             p_expected_updated_at: current.updated_at,
@@ -538,10 +606,21 @@ export async function updateReservation(
             p_notes: "Additional downpayment entered in Edit order.",
             p_evidence: [],
           })
-        : { error: { code: "not-found", message: "reservation_not_found" } };
+        : { data: null, error: { code: "not-found", message: "reservation_not_found" } };
       if (paymentError) {
         console.error("Additional downpayment failed:", paymentError.code, paymentError.message);
         redirect(returnTo + "error=downpayment-not-saved");
+      }
+      if (additionalPaidAt && paymentResult?.paymentId) {
+        const { error: paidAtError } = await supabase.rpc(
+          "set_reservation_payment_paid_at",
+          { p_payment_id: paymentResult.paymentId, p_paid_at: additionalPaidAt },
+        );
+        if (paidAtError) {
+          // The payment itself is saved; only its paid date falls back to
+          // the time it was entered.
+          console.error("Payment date not saved:", paidAtError.code, paidAtError.message);
+        }
       }
       await logActivity(supabase, {
         action: "payment_recorded",

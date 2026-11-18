@@ -25,7 +25,7 @@ function UserSummary({
         <span className="block truncate text-sm font-semibold text-white">
           {userName}
         </span>
-        <span className="block truncate text-xs text-white/45">
+        <span className="block truncate text-xs text-white/70 dark:text-white/45">
           {role} · {userEmail}
         </span>
       </span>
@@ -36,7 +36,7 @@ function UserSummary({
 export function DesktopSidebar(props: AppNavigationProps) {
   return (
     <aside
-      className="theme-light fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-ink px-5 py-7 lg:flex"
+      className="theme-light fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-gradient-to-b from-[#d63d8a] to-[#9c1f5f] px-5 py-7 dark:from-ink dark:to-ink lg:flex"
       data-print-hide
     >
       <div className="px-3">
@@ -78,7 +78,7 @@ export function MobileHeader(props: AppNavigationProps) {
               <span className="block h-px w-5 bg-current" />
             </span>
           </summary>
-          <div className="theme-light absolute right-0 mt-3 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-white/10 bg-ink p-4 shadow-2xl">
+          <div className="theme-light absolute right-0 mt-3 w-72 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-white/10 bg-gradient-to-b from-[#d63d8a] to-[#9c1f5f] p-4 shadow-2xl dark:from-ink dark:to-ink">
             <UserSummary {...props} />
             <nav className="mt-4 border-t border-white/10 pt-4">
               <NavigationLinks />

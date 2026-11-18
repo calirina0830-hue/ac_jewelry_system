@@ -74,7 +74,79 @@ export type CustomerInvoice = {
     reservationId: string;
     itemLabels: string[];
   }>;
+  // Invoice Summary page: everything in the current computation, by date.
+  summary: CustomerInvoiceSummary;
 };
+
+export type InvoiceSummaryDateRow = {
+  // YYYY-MM-DD in Manila time, or "" when no date was recorded.
+  dateKey: string;
+  amount: number;
+  quantity: number;
+};
+
+export type CustomerInvoiceSummary = {
+  mined: InvoiceSummaryDateRow[];
+  // One row per payment, oldest first. recordedAt is null for a downpayment
+  // that has no payment record (typed on an older order).
+  downpayments: Array<{ recordedAt: string | null; amount: number }>;
+  releases: Array<{
+    id: string;
+    shipmentNo: string;
+    releaseDateKey: string;
+    orderDateKeys: string[];
+    amount: number;
+    quantity: number;
+    downpaymentApplied: number;
+    cod: number;
+  }>;
+  remaining: InvoiceSummaryDateRow[];
+  totals: {
+    mined: number;
+    minedQuantity: number;
+    downpayment: number;
+    released: number;
+    releasedQuantity: number;
+    appliedDownpayment: number;
+    cod: number;
+    remaining: number;
+    remainingQuantity: number;
+    remainingDownpayment: number;
+    remainingBalance: number;
+  };
+};
+
+const manilaDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Manila",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function manilaDayKey(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : manilaDayFormatter.format(date);
+}
+
+function addToDateRows(
+  rows: Map<string, InvoiceSummaryDateRow>,
+  dateKey: string,
+  amount: number,
+  quantity: number,
+) {
+  const row = rows.get(dateKey) ?? { dateKey, amount: 0, quantity: 0 };
+  row.amount += amount;
+  row.quantity += quantity;
+  rows.set(dateKey, row);
+}
+
+function sortedDateRows<T extends { dateKey: string }>(rows: Iterable<T>) {
+  // Undated rows go last.
+  return [...rows].sort((a, b) =>
+    (a.dateKey || "9999").localeCompare(b.dateKey || "9999"),
+  );
+}
 
 function normalizeCustomerName(value: string | null | undefined) {
   return (value ?? "")
@@ -142,12 +214,13 @@ export async function loadCustomerInvoice(
       .order("created_at", { ascending: true }),
     supabase
       .from("reservation_payments")
-      .select("reservation_id, amount, voided_at")
+      // "*" so this keeps working before the paid_at column is added.
+      .select("*")
       .in("reservation_id", reservationIds),
     supabase
       .from("reservation_shipments")
       .select(
-        "id, shipment_no, reservation_id, status, downpayment_applied, created_at, reservation_shipment_items(shipment_id, reservation_item_id, quantity)",
+        "id, shipment_no, reservation_id, status, downpayment_applied, shipped_at, created_at, reservation_shipment_items(shipment_id, reservation_item_id, quantity)",
       )
       .in("reservation_id", reservationIds),
     supabase
@@ -283,8 +356,80 @@ export async function loadCustomerInvoice(
     string,
     CustomerInvoice["pendingReleases"][number]
   >();
+  const minedRows = new Map<string, InvoiceSummaryDateRow>();
+  const remainingRows = new Map<string, InvoiceSummaryDateRow>();
+  const downpaymentRows: CustomerInvoiceSummary["downpayments"] = [];
+  const summaryReleases: CustomerInvoiceSummary["releases"] = [];
 
   for (const reservation of reservations) {
+    // Invoice Summary: every item of the order by its order date, what is
+    // still waiting, each payment by the day it was recorded, and each
+    // confirmed release.
+    const summaryLedger = ledgersByReservation.get(reservation.id);
+    const summaryItemById = new Map(
+      (itemsByReservation.get(reservation.id) ?? []).map((item) => [item.id, item]),
+    );
+    const orderDayOf = (itemId: string) => {
+      const item = summaryItemById.get(itemId);
+      return manilaDayKey(item?.ordered_at ?? item?.created_at ?? reservation.reserved_at);
+    };
+    for (const ledgerItem of summaryLedger?.items ?? []) {
+      const day = orderDayOf(ledgerItem.id);
+      addToDateRows(
+        minedRows,
+        day,
+        Math.max(ledgerItem.grossValue - ledgerItem.discount, 0),
+        ledgerItem.quantity,
+      );
+      if (ledgerItem.remainingQty > 0) {
+        addToDateRows(
+          remainingRows,
+          day,
+          ledgerItem.remainingSubtotal,
+          ledgerItem.remainingQty,
+        );
+      }
+    }
+    for (const payment of payments ?? []) {
+      if (payment.voided_at || payment.reservation_id !== reservation.id) continue;
+      downpaymentRows.push({
+        // When the customer paid, as typed in Edit order; otherwise when the
+        // payment was entered.
+        recordedAt: payment.paid_at ?? payment.recorded_at ?? null,
+        amount: Number(payment.amount),
+      });
+    }
+    const ledgerItemById = new Map(
+      (summaryLedger?.items ?? []).map((item) => [item.id, item]),
+    );
+    for (const shipment of shippedOf(reservation.id)) {
+      let amount = 0;
+      let releasedQuantity = 0;
+      const orderDays = new Set<string>();
+      for (const line of shipmentLinesByShipment.get(shipment.id) ?? []) {
+        const ledgerItem = ledgerItemById.get(line.reservation_item_id);
+        if (!ledgerItem) continue;
+        const share = ledgerItem.quantity > 0 ? line.quantity / ledgerItem.quantity : 0;
+        amount += Math.max(
+          ledgerItem.unitPrice * line.quantity - ledgerItem.discount * share,
+          0,
+        );
+        releasedQuantity += line.quantity;
+        orderDays.add(orderDayOf(line.reservation_item_id));
+      }
+      const downpaymentApplied = Number(shipment.downpayment_applied ?? 0);
+      summaryReleases.push({
+        id: shipment.id,
+        shipmentNo: shipment.shipment_no,
+        releaseDateKey: manilaDayKey(shipment.shipped_at ?? shipment.created_at),
+        orderDateKeys: [...orderDays].filter(Boolean).sort(),
+        amount,
+        quantity: releasedQuantity,
+        downpaymentApplied,
+        cod: Math.max(amount - downpaymentApplied, 0),
+      });
+    }
+
     const reservationItems = itemsByReservation.get(reservation.id) ?? [];
     const allShipments = shipmentsByReservation.get(reservation.id) ?? [];
     const pendingByItem = new Map<string, { shipmentId: string; quantity: number }>();
@@ -410,6 +555,47 @@ export async function loadCustomerInvoice(
 
   const cycle = computeCycleTotals(cycleOrders);
 
+  // A downpayment typed on an older order may have no payment record; show it
+  // as an undated line so the table adds up to the invoice's downpayment.
+  const recordedDownpayment = downpaymentRows.reduce(
+    (sum, row) => sum + row.amount,
+    0,
+  );
+  downpaymentRows.sort((a, b) =>
+    (a.recordedAt ?? "").localeCompare(b.recordedAt ?? ""),
+  );
+  if (cycle.downpayment - recordedDownpayment > 0.005) {
+    // Shown first: it was entered before any recorded payment.
+    downpaymentRows.unshift({
+      recordedAt: null,
+      amount: cycle.downpayment - recordedDownpayment,
+    });
+  }
+  const mined = sortedDateRows(minedRows.values());
+  const remaining = sortedDateRows(remainingRows.values());
+  const releases = summaryReleases.sort((a, b) =>
+    a.releaseDateKey.localeCompare(b.releaseDateKey),
+  );
+  const summary: CustomerInvoiceSummary = {
+    mined,
+    downpayments: downpaymentRows,
+    releases,
+    remaining,
+    totals: {
+      mined: cycle.totalItems,
+      minedQuantity: mined.reduce((sum, row) => sum + row.quantity, 0),
+      downpayment: cycle.downpayment,
+      released: cycle.released,
+      releasedQuantity: releases.reduce((sum, row) => sum + row.quantity, 0),
+      appliedDownpayment: cycle.appliedDownpayment,
+      cod: cycle.cod,
+      remaining: cycle.remainingTotal,
+      remainingQuantity: remaining.reduce((sum, row) => sum + row.quantity, 0),
+      remainingDownpayment: cycle.remainingDownpayment,
+      remainingBalance: cycle.remainingBalance,
+    },
+  };
+
   const customer =
     (customers ?? []).find(
       (candidate) => normalizeCustomerName(candidate.name) === normalizedTarget,
@@ -471,5 +657,6 @@ export async function loadCustomerInvoice(
       remainingDiscount: invoiceAmountsByReservation.get(reservation.id)?.remainingDiscount ?? 0,
     })),
     pendingReleases: [...pendingReleases.values()],
+    summary,
   };
 }

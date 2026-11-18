@@ -116,6 +116,9 @@ export function ReservationForm({
     customerOrders?.paid ?? initialValue?.amountPaid ?? "0.00",
   );
   const [additionalDownpayment, setAdditionalDownpayment] = useState("");
+  const [additionalDownpaymentPaidAt, setAdditionalDownpaymentPaidAt] = useState("");
+  const hasAdditionalDownpayment =
+    (parseMoneyToCents(additionalDownpayment.trim() || "0") ?? 0) > 0;
 
   // Modals for inline creation
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -586,6 +589,21 @@ export function ReservationForm({
                 step="0.01"
                 type="number"
                 value={additionalDownpayment}
+              />
+            </div>
+          )}
+          {initialValue && (
+            <div className="w-56">
+              <InputField
+                disabled={!hasAdditionalDownpayment}
+                errors={state.fieldErrors?.additionalDownpaymentPaidAt}
+                label="Date & time paid"
+                name="additionalDownpaymentPaidAt"
+                onChange={(event) => setAdditionalDownpaymentPaidAt(event.target.value)}
+                required={hasAdditionalDownpayment}
+                title="When the customer paid this downpayment (Manila time)"
+                type="datetime-local"
+                value={additionalDownpaymentPaidAt}
               />
             </div>
           )}

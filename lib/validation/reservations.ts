@@ -195,8 +195,8 @@ export const reservationQuerySchema = z.object({
     .enum(["all", ...RESERVATION_STATUSES, "partially-paid"])
     .catch("reserved"),
   archive: z.enum(["active", "archived", "all"]).catch("active"),
-  // Reserved tab only: which orders have no downpayment or a partial payment.
-  payment: z.enum(["all", "no-downpayment", "partially-paid"]).catch("all"),
+  // Reserved tab only: rows whose Status reads Reserved or Partially paid.
+  payment: z.enum(["all", "reserved", "partially-paid"]).catch("all"),
   sort: z
     .enum([
       "reservation_no",

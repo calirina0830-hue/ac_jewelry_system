@@ -37,7 +37,7 @@ export function BrandMark({ compact = false, light = false }: BrandMarkProps) {
           <span
             className={
               "mt-1 block whitespace-nowrap text-[0.52rem] font-semibold tracking-[0.12em] " +
-              (light ? "text-gold-light" : "text-gold-dark")
+              (light ? "text-white/80 dark:text-gold-light" : "text-gold-dark")
             }
           >
             {BUSINESS.descriptor.toUpperCase()}

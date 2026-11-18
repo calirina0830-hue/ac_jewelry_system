@@ -135,13 +135,14 @@ test("category and dashboard monitoring use database-derived snapshots", async (
   assert.match(migration, /outstanding_balance numeric/i);
 });
 
-test("reservation summaries keep customer name primary and social name secondary", async () => {
+test("reservation summaries show the Facebook name first and the customer name under it", async () => {
   const [listPage] = await Promise.all([
     readFile(new URL("../app/(dashboard)/reservations/page.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(listPage, /reservation\.customer_name/);
-  assert.equal(listPage.includes("Facebook / CS:"), true);
+  assert.equal(listPage.includes("group.facebookName || group.customerName"), true);
+  assert.equal(listPage.includes("Customer: {group.customerName}"), true);
 });
 
 test("reservation operational views preserve status and search only seller identities", async () => {

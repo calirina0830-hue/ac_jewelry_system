@@ -35,7 +35,7 @@ import { PageNotice } from "@/components/ui/page-notice";
 import { Pagination } from "@/components/ui/pagination";
 import { SortLink } from "@/components/ui/sort-link";
 import { getCurrentProfile, roleCanWrite, roleIsAdmin } from "@/lib/auth";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatCurrency, formatManilaDateTime } from "@/lib/format";
 import { loadCustomerInvoice } from "@/lib/reservations/customer-invoice";
 import { toSearchParams, toSearchPattern } from "@/lib/query";
 import { filterEndExclusiveIso, filterStartIso } from "@/lib/reservations/date-filter";
@@ -64,7 +64,7 @@ const STATUS_TABS = [
 
 const PAYMENT_FILTERS = [
   { value: "all", label: "All" },
-  { value: "no-downpayment", label: "No downpayment" },
+  { value: "reserved", label: "Reserved" },
   { value: "partially-paid", label: "Partially paid" },
 ] as const;
 
@@ -216,9 +216,8 @@ export default async function ReservationsPage({
   // Start independent classification and item-search reads together so the
   // main reservation query does not wait for them one after another.
   const classificationPromise =
-    filters.status === "partially-paid" ||
-    (filters.status === "reserved" && filters.payment === "partially-paid")
-      ? supabase.rpc("get_partially_paid_reservation_ids")
+    filters.status === "partially-paid"
+      ?supabase.rpc("get_partially_paid_reservation_ids")
       : Promise.resolve({ data: null, error: null });
   const itemMatchPromise = search
     ? supabase
@@ -242,7 +241,9 @@ export default async function ReservationsPage({
     ...new Set((itemMatchResult.data ?? []).map((item) => item.reservation_id)),
   ];
 
-  let query = supabase.from("reservation_list").select("*", { count: "exact" });
+  // No exact count: counting the aggregated view doubles the database work on
+  // every load, and the cap notice below only needs to know the cap was hit.
+  let query = supabase.from("reservation_list").select("*");
 
   if (isDeliveredView) {
     // Any release sets delivered_at. This tab lists only the released part of
@@ -250,8 +251,12 @@ export default async function ReservationsPage({
     query = query.not("delivered_at", "is", null);
   } else if (filters.status === "reserved") {
     // Paid orders are read too: a partly released order stays here whatever
-    // its payment status. The row filter below applies the exact rule.
-    query = query.in("status", ["reserved", "paid"]);
+    // its payment status. Only a released order can be partly released, and
+    // any release sets delivered_at, so other Paid orders are skipped. The
+    // row filter below applies the exact rule.
+    query = query.or(
+      "status.eq.reserved,and(status.eq.paid,delivered_at.not.is.null)",
+    );
   } else if (filters.status === "partially-paid") {
     // Partial payment is a derived state: the reservation must still be
     // Reserved, have an active payment, and retain a balance.
@@ -273,22 +278,8 @@ export default async function ReservationsPage({
     query = query.eq("status", filters.status);
   }
 
-  // Payment filter on the Reserved tab. "No downpayment" is an order with
-  // nothing paid yet; "partially paid" uses the same rule as the partially-paid
-  // view above.
-  if (filters.status === "reserved" && filters.payment === "no-downpayment") {
-    query = query.eq("downpayment", 0).gt("balance", 0);
-  } else if (filters.status === "reserved" && filters.payment === "partially-paid") {
-    query = query
-      .eq("status", "reserved")
-      .gt("balance", 0)
-      .in(
-        "id",
-        classificationError || classificationIdList.length === 0
-          ? ["00000000-0000-0000-0000-000000000000"]
-          : classificationIdList,
-      );
-  }
+  // The Reserved tab's payment filter (Reserved / Partially paid) is applied
+  // to the customer rows below, using the same rule as the Status column.
 
   if (filters.archive === "active") {
     query = query.is("archived_at", null);
@@ -335,7 +326,7 @@ export default async function ReservationsPage({
   // Keep the same 2,000-record safety ceiling used by the See All view.
   const reservationsPromise = orderedQuery.limit(2000);
   const [
-    { data: reservations, count, error },
+    { data: reservations, error },
     profile,
     customerInvoice,
     editForm,
@@ -499,7 +490,6 @@ export default async function ReservationsPage({
     }
   }
 
-  const totalCount = count ?? 0;
   const bulkEnabled =
     (filters.archive === "active" &&
       (isAdmin ||
@@ -632,13 +622,72 @@ export default async function ReservationsPage({
     }
   }
 
-  customerGroups.sort((a, b) =>
-    normalizeCustomerPart(a.customerName).localeCompare(
-      normalizeCustomerPart(b.customerName),
-      undefined,
-      { sensitivity: "base" },
-    ),
-  );
+  // Groups keep the query order (newest reserved_at first by default, so a
+  // fresh import lands on top). Only an explicit Customer sort reorders them
+  // alphabetically.
+  // A customer row reads "Partially paid" when something is paid and a
+  // balance remains; otherwise it reads "Reserved". The payment filter keeps
+  // only the rows whose Status matches.
+  const isGroupPartiallyPaid = (group: CustomerGroup) =>
+    filters.status === "partially-paid" ||
+    (filters.status === "reserved" && group.totalPaid > 0 && group.totalBalance > 0);
+  if (filters.status === "reserved" && filters.payment !== "all") {
+    const wantPartiallyPaid = filters.payment === "partially-paid";
+    const kept = customerGroups.filter(
+      (group) => isGroupPartiallyPaid(group) === wantPartiallyPaid,
+    );
+    customerGroups.splice(0, customerGroups.length, ...kept);
+  }
+
+  // Every item from all of a customer's reservations, listed in one row.
+  // Clicking the Reserved header sorts those items by their own date (the
+  // live/order date, falling back to the reservation date) and orders the
+  // customers by their latest item — the same date the Reserved column shows.
+  const itemDateSort =
+    rawParams.sort === "reserved_at" && operationalDateColumn === "reserved_at";
+  const itemDirectionFactor = filters.direction === "asc" ? 1 : -1;
+  const combinedItemsByGroup = new Map<string, ReservationItemSummary[]>();
+  const groupSortTime = new Map<string, number>();
+  // Latest item order date/time per customer, shown in the Reserved column.
+  const latestItemDateByGroup = new Map<string, string>();
+  for (const group of customerGroups) {
+    const dated = group.items.flatMap((reservation) =>
+      (itemsByReservation.get(reservation.id) ?? []).map((item) => {
+        const date = item.orderedAt ?? reservation.reserved_at ?? "";
+        return { item, date, time: Date.parse(date) || 0 };
+      }),
+    );
+    let latest: (typeof dated)[number] | undefined;
+    for (const entry of dated) {
+      if (!latest || entry.time > latest.time) latest = entry;
+    }
+    if (latest?.date) latestItemDateByGroup.set(group.key, latest.date);
+    if (itemDateSort) {
+      dated.sort((a, b) => itemDirectionFactor * (a.time - b.time));
+    }
+    combinedItemsByGroup.set(group.key, dated.map((entry) => entry.item));
+    groupSortTime.set(group.key, latest?.time ?? 0);
+  }
+  if (itemDateSort) {
+    customerGroups.sort(
+      (a, b) =>
+        itemDirectionFactor *
+        ((groupSortTime.get(a.key) ?? 0) - (groupSortTime.get(b.key) ?? 0)),
+    );
+  }
+
+  if (sortColumn === "customer_name") {
+    const directionFactor = filters.direction === "asc" ? 1 : -1;
+    customerGroups.sort(
+      (a, b) =>
+        directionFactor *
+        normalizeCustomerPart(a.customerName).localeCompare(
+          normalizeCustomerPart(b.customerName),
+          undefined,
+          { sensitivity: "base" },
+        ),
+    );
+  }
 
   const pageCount = isAll || !limit
     ? 1
@@ -964,7 +1013,7 @@ export default async function ReservationsPage({
           )}
           {summaryCapped && (
             <span className="text-amber-700">
-              {" "}· Only the first 2,000 of {totalCount.toLocaleString("en-PH")} reservations are counted. Narrow the dates to see the rest.
+              {" "}· Only the first 2,000 reservations are counted. Narrow the dates to see the rest.
             </span>
           )}
         </div>
@@ -1048,21 +1097,13 @@ export default async function ReservationsPage({
                 <tbody className="divide-y divide-border">
                   {visibleCustomerGroups.map((group) => {
                     const primaryReservation = group.items[0];
-                    // Every item from all of this customer's reservations is
-                    // listed in this one row.
-                    const combinedItems = group.items.flatMap(
-                      (reservation) => itemsByReservation.get(reservation.id) ?? [],
-                    );
+                    const combinedItems = combinedItemsByGroup.get(group.key) ?? [];
                     const allSameStatus = group.items.every(
                       (r) => r.status === primaryReservation.status,
                     );
                     const allArchived = group.items.every((r) => Boolean(r.archived_at));
                     const allDelivered = group.items.every((r) => Boolean(r.delivered_at));
-                    const partiallyPaid =
-                      filters.status === "partially-paid" ||
-                      (filters.status === "reserved" &&
-                        group.totalPaid > 0 &&
-                        group.totalBalance > 0);
+                    const partiallyPaid = isGroupPartiallyPaid(group);
 
                     const operationalDate =
                       operationalDateColumn === "paid_at"
@@ -1071,7 +1112,8 @@ export default async function ReservationsPage({
                           ? primaryReservation.delivered_at ?? primaryReservation.reserved_at
                           : operationalDateColumn === "cancelled_at"
                             ? primaryReservation.cancelled_at ?? primaryReservation.reserved_at
-                            : primaryReservation.reserved_at;
+                            : latestItemDateByGroup.get(group.key) ??
+                              primaryReservation.reserved_at;
 
                     return (
                       <tr className="align-top transition hover:bg-canvas/70" key={group.key}>
@@ -1091,13 +1133,19 @@ export default async function ReservationsPage({
                             className="font-semibold text-ink hover:text-gold-dark hover:underline"
                             href={invoiceHrefFor(group.customerName)}
                           >
-                            {group.customerName}
+                            {group.facebookName || group.customerName}
                           </Link>
-                          <p className="mt-0.5 text-xs text-muted">
-                            {group.facebookName
-                              ? "Facebook / CS: " + group.facebookName
-                              : group.phone ?? "No Facebook / CS name"}
-                          </p>
+                          {group.facebookName &&
+                          normalizeCustomerPart(group.facebookName) !==
+                            normalizeCustomerPart(group.customerName) ? (
+                            <p className="mt-0.5 text-xs text-muted">
+                              Customer: {group.customerName}
+                            </p>
+                          ) : !group.facebookName ? (
+                            <p className="mt-0.5 text-xs text-muted">
+                              {group.phone ?? "No Facebook / CS name"}
+                            </p>
+                          ) : null}
                           {group.items.length > 1 && (
                             <p className="mt-0.5 text-[11px] text-muted">
                               {group.items.length} reservations
@@ -1146,7 +1194,7 @@ export default async function ReservationsPage({
                           )}
                         </td>
                         <td className="whitespace-nowrap px-3 py-3 text-muted">
-                          {formatDate(operationalDate)}
+                          {formatManilaDateTime(operationalDate)}
                         </td>
                         <td className="px-3 py-3">
                           <GroupActions

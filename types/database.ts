@@ -330,6 +330,7 @@ export type Database = {
           notes: string | null;
           recorded_by: string | null;
           recorded_at: string;
+          paid_at: string | null;
           voided_at: string | null;
           voided_by: string | null;
           void_reason: string | null;
@@ -812,6 +813,10 @@ export type Database = {
           balance: number;
           status: string;
         };
+      };
+      set_reservation_payment_paid_at: {
+        Args: { p_payment_id: string; p_paid_at: string };
+        Returns: void;
       };
       record_reservation_payment: {
         Args: {
